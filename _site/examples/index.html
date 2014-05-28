@@ -43,28 +43,28 @@
 
     <div id="content">
       <script src="/js/d3.js"></script>
+<script src="/js/d3plus.js"></script>
 <script src="http://d3js.org/queue.v1.min.js"></script>
 
 <script>
+
+  var order = "basic.forms.advanced".split(".")
+    , categories = {}
+    , gists = []
+    , users = []
+    , titles = {
+      "basic"    : "Getting Started",
+      "forms"    : "D3plus Forms",
+      "advanced" : "Visualization Techniques"
+    }
 
   if ("") {
     var container = d3.select("#")
   }
 
   var section = container || d3.select("#content")
-  if (container) {
-    var loading = section.append("h2")
-  }
-  else {
-    var loading = d3.select("#content").append("section").append("h2")
-  }
-  loading.text("Loading...")
-
-  var order = "basic.advanced".split(".")
-
-  var categories = {}
-    , gists = []
-    , users = []
+    , loading = section.append("section").attr("id","loading")
+  loading.append("h2").text("Loading...")
 
   
     var url = "/examples/advanced/10211654/index.html".split("/")
@@ -221,6 +221,20 @@
       gists.push(gist)
     }
   
+    var url = "/examples/advanced/10bfe1908a200c201145/index.html".split("/")
+      , user = ""
+      , layout = "example"
+    if (user != "" && users.indexOf(user) < 0) {
+      users.push(user)
+    }
+
+    if (layout && url.length == 5 && url[1] == "examples" && url[3] != "simple") {
+      var category = url[2]
+        , gist = url[3].split(".")[0]
+      categories[gist] = category
+      gists.push(gist)
+    }
+  
     var url = "/examples/advanced/9860411/index.html".split("/")
       , user = ""
       , layout = "example"
@@ -361,6 +375,20 @@
       gists.push(gist)
     }
   
+    var url = "/examples/basic/2ce67895efd23771943b/index.html".split("/")
+      , user = ""
+      , layout = "example"
+    if (user != "" && users.indexOf(user) < 0) {
+      users.push(user)
+    }
+
+    if (layout && url.length == 5 && url[1] == "examples" && url[3] != "simple") {
+      var category = url[2]
+        , gist = url[3].split(".")[0]
+      categories[gist] = category
+      gists.push(gist)
+    }
+  
     var url = "/examples/basic/9029130/index.html".split("/")
       , user = ""
       , layout = "example"
@@ -446,6 +474,34 @@
     }
   
     var url = "/examples/basic/9042919/index.html".split("/")
+      , user = ""
+      , layout = "example"
+    if (user != "" && users.indexOf(user) < 0) {
+      users.push(user)
+    }
+
+    if (layout && url.length == 5 && url[1] == "examples" && url[3] != "simple") {
+      var category = url[2]
+        , gist = url[3].split(".")[0]
+      categories[gist] = category
+      gists.push(gist)
+    }
+  
+    var url = "/examples/forms/62d1df2506fd7c73b4c6/index.html".split("/")
+      , user = ""
+      , layout = "example"
+    if (user != "" && users.indexOf(user) < 0) {
+      users.push(user)
+    }
+
+    if (layout && url.length == 5 && url[1] == "examples" && url[3] != "simple") {
+      var category = url[2]
+        , gist = url[3].split(".")[0]
+      categories[gist] = category
+      gists.push(gist)
+    }
+  
+    var url = "/examples/forms/8ea69aa2266c39d35380/index.html".split("/")
       , user = ""
       , layout = "example"
     if (user != "" && users.indexOf(user) < 0) {
@@ -976,19 +1032,58 @@
 
       loading.remove()
 
+      if ( order.length > 1 ) {
+
+        var toggles = [{"value": "all", "text": "All Examples"}]
+        order.forEach(function(type){
+
+          var title = titles[type]
+          || type.replace(/_/g," ").replace(/\w\S*/g, function(txt){
+            return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
+          })
+
+          toggles.push({"value": type, "text": title})
+
+        })
+
+        d3plus.form()
+          .container(d3.select("#content").append("section").attr("id","toggle"))
+          .data(toggles)
+          .focus("all",function(value){
+
+            d3.selectAll("section")
+              .style("display",function(d){
+
+                if ( value === "all" ) {
+                  return "block"
+                }
+
+                return ["toggle",value].indexOf(this.id) >= 0 ? "block" : "none"
+
+              })
+          })
+          .font({
+            "align": "center"
+          })
+          .width(600)
+          .draw()
+
+      }
+
       var delay = 0
       order.forEach(function(type){
 
-        var section = container || d3.select("#content").append("section")
+        var section = container || d3.select("#content").append("section").attr("id",type)
 
         if (type.length > 0) {
 
-          var title = type.replace(/_/g," ").replace(/\w\S*/g, function(txt){
+          var title = titles[type]
+          || type.replace(/_/g," ").replace(/\w\S*/g, function(txt){
             return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
           })
 
           section.append("h2")
-            .text(title+" Examples")
+            .text(title)
             .call(enter)
 
           var section_gists = merged.filter(function(g){

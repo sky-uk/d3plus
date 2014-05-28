@@ -27,7 +27,7 @@ layout: default
 
 <script>
 
-  var id = {{ id }}
+  var id = "{{ id }}"
 
   d3.json("https://api.github.com/gists/"+id+"?client_id={{site.github_api.id}}&client_secret={{site.github_api.secret}}",function(error,gist){
 

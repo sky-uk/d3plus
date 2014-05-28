@@ -1,26 +1,26 @@
 <script src="/js/d3.js"></script>
+<script src="/js/d3plus.js"></script>
 <script src="http://d3js.org/queue.v1.min.js"></script>
 
 <script>
+
+  var order = "{{ include.order }}".split(".")
+    , categories = {}
+    , gists = []
+    , users = []
+    , titles = {
+      "basic"    : "Getting Started",
+      "forms"    : "D3plus Forms",
+      "advanced" : "Visualization Techniques"
+    }
 
   if ("{{ include.container }}") {
     var container = d3.select("#{{ include.container }}")
   }
 
   var section = container || d3.select("#content")
-  if (container) {
-    var loading = section.append("h2")
-  }
-  else {
-    var loading = d3.select("#content").append("section").append("h2")
-  }
-  loading.text("Loading...")
-
-  var order = "{{ include.order }}".split(".")
-
-  var categories = {}
-    , gists = []
-    , users = []
+    , loading = section.append("section").attr("id","loading")
+  loading.append("h2").text("Loading...")
 
   {% for p in site.pages %}
     var url = "{{ p.url }}".split("/")
@@ -78,19 +78,58 @@
 
       loading.remove()
 
+      if ( order.length > 1 ) {
+
+        var toggles = [{"value": "all", "text": "All Examples"}]
+        order.forEach(function(type){
+
+          var title = titles[type]
+          || type.replace(/_/g," ").replace(/\w\S*/g, function(txt){
+            return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
+          })
+
+          toggles.push({"value": type, "text": title})
+
+        })
+
+        d3plus.form()
+          .container(d3.select("#content").append("section").attr("id","toggle"))
+          .data(toggles)
+          .focus("all",function(value){
+
+            d3.selectAll("section")
+              .style("display",function(d){
+
+                if ( value === "all" ) {
+                  return "block"
+                }
+
+                return ["toggle",value].indexOf(this.id) >= 0 ? "block" : "none"
+
+              })
+          })
+          .font({
+            "align": "center"
+          })
+          .width(600)
+          .draw()
+
+      }
+
       var delay = 0
       order.forEach(function(type){
 
-        var section = container || d3.select("#content").append("section")
+        var section = container || d3.select("#content").append("section").attr("id",type)
 
         if (type.length > 0) {
 
-          var title = type.replace(/_/g," ").replace(/\w\S*/g, function(txt){
+          var title = titles[type]
+          || type.replace(/_/g," ").replace(/\w\S*/g, function(txt){
             return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
           })
 
           section.append("h2")
-            .text(title+" Examples")
+            .text(title)
             .call(enter)
 
           var section_gists = merged.filter(function(g){

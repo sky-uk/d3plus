@@ -251,6 +251,15 @@ img.background {
 
 section {
   position: relative;
+  text-align: left;
+}
+
+section#loading {
+  margin-bottom: 100px;
+}
+
+section#toggle {
+text-align: center;
 }
 
 section.topic-2,
