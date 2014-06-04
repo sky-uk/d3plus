@@ -9,9 +9,10 @@
     , gists = []
     , users = []
     , titles = {
-      "basic"    : "Basics",
-      "forms"    : "Forms",
-      "advanced" : "Advanced"
+      "basic"     : "Basics",
+      "forms"     : "Forms",
+      "advanced"  : "Advanced",
+      "utilities" : "Utilities"
     }
 
   if ("{{ include.container }}") {
@@ -95,7 +96,6 @@
         var toggle = d3plus.form()
           .container(d3.select("#content").append("section").attr("id","toggle"))
           .data(toggles)
-          .order("order")
           .focus("all",function(value){
 
             d3.selectAll("section")
@@ -113,6 +113,8 @@
           .font({
             "align": "center"
           })
+          .order("order")
+          .type("toggle")
           .width(350)
           .ui({
             "padding": 2

@@ -48,14 +48,15 @@
 
 <script>
 
-  var order = "basic.forms.advanced".split(".")
+  var order = "basic.forms.advanced.utilities".split(".")
     , categories = {}
     , gists = []
     , users = []
     , titles = {
-      "basic"    : "Basics",
-      "forms"    : "Forms",
-      "advanced" : "Advanced"
+      "basic"     : "Basics",
+      "forms"     : "Forms",
+      "advanced"  : "Advanced",
+      "utilities" : "Utilities"
     }
 
   if ("") {
@@ -532,6 +533,20 @@
     var url = "/examples/index.html".split("/")
       , user = ""
       , layout = "default"
+    if (user != "" && users.indexOf(user) < 0) {
+      users.push(user)
+    }
+
+    if (layout && url.length == 5 && url[1] == "examples" && url[3] != "simple") {
+      var category = url[2]
+        , gist = url[3].split(".")[0]
+      categories[gist] = category
+      gists.push(gist)
+    }
+  
+    var url = "/examples/utilities/53696917e5fd0964f91e/index.html".split("/")
+      , user = ""
+      , layout = "example"
     if (user != "" && users.indexOf(user) < 0) {
       users.push(user)
     }
@@ -1063,7 +1078,6 @@
         var toggle = d3plus.form()
           .container(d3.select("#content").append("section").attr("id","toggle"))
           .data(toggles)
-          .order("order")
           .focus("all",function(value){
 
             d3.selectAll("section")
@@ -1081,6 +1095,8 @@
           .font({
             "align": "center"
           })
+          .order("order")
+          .type("toggle")
           .width(350)
           .ui({
             "padding": 2
