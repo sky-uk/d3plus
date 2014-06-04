@@ -3,7 +3,7 @@
   var d3plus    = window.d3plus || {}
   window.d3plus = d3plus
 
-  d3plus.version = "1.3.0 - Sky"
+  d3plus.version = "1.3.1 - Sky"
   d3plus.repo    = "https://github.com/alexandersimoes/d3plus/"
 
   d3plus.array         = {}
@@ -14,8 +14,10 @@
   d3plus.input         = {}
   d3plus.locale        = {}
   d3plus.method        = {}
+  d3plus.number        = {}
   d3plus.object        = {}
   d3plus.shape         = {}
+  d3plus.string        = {}
   d3plus.style         = {}
   d3plus.tooltip       = {}
   d3plus.ui            = {}
@@ -26,6 +28,68 @@
 
 
 })();
+
+//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+// Sorts an array of objects
+//------------------------------------------------------------------------------
+d3plus.array.sort = function( arr , keys , sort , colors , vars ) {
+
+  if ( !arr || arr.length <= 1 || !keys ) {
+    return arr || []
+  }
+
+  if ( !sort ) {
+    var sort = "asc"
+  }
+
+  if ( !(keys instanceof Array) ) {
+    keys = [ keys ]
+  }
+
+  if ( !colors ) {
+    var colors = [ "color" ]
+  }
+  else if ( !(colors instanceof Array) ) {
+    colors = [ colors ]
+  }
+
+  function comparator( a , b ) {
+
+    var retVal = 0
+
+    for ( var i = 0 ; i < keys.length ; i++ ) {
+
+      var k = keys[i]
+
+      a = !(k in a) && vars ? d3plus.variable.value(vars,a,k) : a[k]
+      b = !(k in b) && vars ? d3plus.variable.value(vars,b,k) : b[k]
+
+      a = a instanceof Array ? a = a[0]
+        : typeof a === "string" ? a = a.toLowerCase() : a
+      b = b instanceof Array ? b = b[0]
+        : typeof b === "string" ? b = b.toLowerCase() : b
+
+      retVal = colors.indexOf(k) >= 0 ? d3plus.color.sort( a , b )
+             : a < b ? -1 : 1
+
+      if ( retVal !== 0 || i === keys.length-1 ) {
+        break
+      }
+
+    }
+
+    return sort === "asc" ? retVal : -retVal
+
+  }
+
+  if ( arr.length === 2 ) {
+    return comparator(arr[0],arr[1])
+  }
+
+  return arr.sort(comparator)
+
+
+}
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Updates an array, either overwriting it with a new array, removing an entry
@@ -51,24 +115,6 @@ d3plus.array.update = function( arr , x ) {
 }
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-// Darkens a color
-//------------------------------------------------------------------------------
-d3plus.color.darker = function(color,increment) {
-  var c = d3.hsl(color);
-
-  if (!increment) {
-    var increment = 0.2
-  }
-
-  c.l -= increment
-  if (c.l < 0.1) {
-    c.l = 0.1
-  }
-
-  return c.toString();
-}
-
-//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Darkens a color if it's too light to appear on white
 //------------------------------------------------------------------------------
 d3plus.color.legible = function(color) {
@@ -81,23 +127,18 @@ d3plus.color.legible = function(color) {
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Lightens a color
 //------------------------------------------------------------------------------
-d3plus.color.lighter = function(color,increment) {
-  var c = d3.hsl(color);
+d3plus.color.lighter = function( color , increment ) {
 
-  if (!increment) {
-    var increment = 0.1
+  if ( increment === undefined ) {
+    var increment = 0.5
   }
 
-  c.l += increment
-  c.s -= increment/2
-  if (c.l > .95) {
-    c.l = .95
-  }
-  if (c.s < .05) {
-    c.s = .05
-  }
+  var c = d3.hsl(color)
 
-  return c.toString();
+  c.l += ( 1 - c.l ) * increment
+
+  return c.toString()
+
 }
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -154,6 +195,21 @@ d3plus.color.scale.default = d3.scale.ordinal().range([
   "#843012",
   "#9A4400",
 ])
+
+//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+// Sorts colors based on hue
+//------------------------------------------------------------------------------
+d3plus.color.sort = function( a , b ) {
+
+  var aHSL = d3.hsl(a)
+  var bHSL = d3.hsl(b)
+
+  a = aHSL.s === 0 ? 361 : aHSL.h
+  b = bHSL.s === 0 ? 361 : bHSL.h
+
+  return a === b ? aHSL.l - bHSL.l : a - b
+
+}
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Returns appropriate text color based off of a given color
@@ -283,7 +339,7 @@ d3plus.data.edges = function(vars) {
 
     if ( source === target ) {
       var str = vars.format.locale.value.dev.sameEdge
-      d3plus.console.warning(d3plus.util.format(str,"\""+source+"\""))
+      d3plus.console.warning(d3plus.string.format(str,"\""+source+"\""))
       return false
     }
     else {
@@ -371,7 +427,7 @@ d3plus.data.element = function( vars ) {
 
         var id = data_obj[vars.id.value] || this.id || false
 
-        if ( id ) {
+        if ( id && isNaN(parseFloat(id)) ) {
 
           var label = d3.select("label[for="+id+"]")
 
@@ -434,7 +490,10 @@ d3plus.data.element = function( vars ) {
   //----------------------------------------------------------------------------
   vars.data.element.call(hideElement)
 
-  if ( vars.container.value === false ) {
+  var containerTag = vars.container.value
+                   ? vars.container.value.node().tagName.toLowerCase() : false
+
+  if ( vars.container.value === false || containerTag === "body" ) {
     vars.container.value = d3.select(vars.data.element.node().parentNode)
   }
 
@@ -450,7 +509,7 @@ d3plus.data.fetch = function(vars,format,years) {
 
   var return_data = [];
 
-  if (vars.dev.value) d3plus.console.group("Fetching \""+format+"\" data")
+  if (vars.dev.value) d3plus.console.group("fetching \""+format+"\" data")
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // If "years" have not been requested, determine the years using .time()
@@ -497,7 +556,7 @@ d3plus.data.fetch = function(vars,format,years) {
 
   }
 
-  if (vars.dev.value) d3plus.console.log("years: "+years.join(","))
+  if (vars.dev.value) d3plus.console.log("years: "+years.join(", "))
 
   if (format == "restricted") {
     var data = vars.data.restricted
@@ -534,7 +593,9 @@ d3plus.data.fetch = function(vars,format,years) {
 
     if (return_data.length == 0 && missing.length && !vars.internal_error) {
       var str = vars.format.locale.value.error.dataYear
-      vars.internal_error = d3plus.util.format(str,missing.join(", "))
+        , and = vars.format.locale.value.ui.and
+      missing = d3plus.string.list(missing,and)
+      vars.internal_error = d3plus.string.format(str,missing)
     }
 
   }
@@ -596,7 +657,7 @@ d3plus.data.filter = function(vars) {
 
   if (vars.check.length >= 1) {
 
-    if (vars.dev.value) d3plus.console.group("Filtering Data by Required Variables");
+    if (vars.dev.value) d3plus.console.group("filtering data by required variables");
     var checking = vars.filters.join(", ")
     if (vars.dev.value) d3plus.console.time(checking)
 
@@ -630,7 +691,7 @@ d3plus.data.filter = function(vars) {
 
   if (vars.time.value && d3.keys(vars.data.filtered).length == 1) {
 
-    if (vars.dev.value) d3plus.console.group("Disaggregating by Year")
+    if (vars.dev.value) d3plus.console.group("disaggregating by year")
 
     // Find available years
     vars.data.time = d3plus.util.uniques(vars.data.filtered.all,vars.time.value)
@@ -664,7 +725,7 @@ d3plus.data.format = function(vars,format) {
   if (!format) var format = "grouped"
   return_data = {}
 
-  if (vars.dev.value) d3plus.console.group("Formatting \""+format+"\" Data")
+  if (vars.dev.value) d3plus.console.group("formatting \""+format+"\" data")
 
   vars.id.nesting.forEach(function(depth){
 
@@ -673,8 +734,8 @@ d3plus.data.format = function(vars,format) {
     var level = vars.id.nesting.slice(0,vars.id.nesting.indexOf(depth)+1)
 
     return_data[depth] = {}
-    
-    for (y in vars.data.restricted) {
+
+    for ( var y in vars.data.restricted ) {
 
       if (format == "grouped") {
         return_data[depth][y] = d3plus.data.nest(vars,vars.data.restricted[y],level,true)
@@ -695,66 +756,10 @@ d3plus.data.format = function(vars,format) {
 
 }
 
-//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-// Load Data using JSON
-//------------------------------------------------------------------------------
-d3plus.data.json = function( vars , key , next ) {
-
-  var url = vars[key].url || vars[key].value
-
-  vars[key].url = url
-  vars[key].value = []
-
-  d3.json( url , function( error , data ) {
-
-    if (!error && data) {
-      
-      if (typeof vars[key].callback === "function") {
-
-        var ret = vars[key].callback(data)
-
-        if (ret) {
-          if ( d3plus.object.validate(ret) && key in ret) {
-            for (k in ret) {
-              if (k in vars) {
-                vars[k].value = ret[k]
-              }
-            }
-          }
-          else {
-            vars[key].value = ret
-          }
-        }
-
-      }
-      else {
-
-        vars[key].value = data
-
-      }
-
-      vars[key].changed = true
-      vars[key].loaded = true
-
-    }
-    else {
-
-      vars.internal_error = "Could not load data from: \""+url+"\""
-
-    }
-
-    next()
-
-  })
-
-}
-
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Get Key Types from Data
 //-------------------------------------------------------------------
 d3plus.data.keys = function(vars,type) {
-
-  if (vars.dev.value) d3plus.console.time("key analysis")
 
   vars[type].keys = {}
 
@@ -780,15 +785,13 @@ d3plus.data.keys = function(vars,type) {
   }
 
   if (d3plus.object.validate(vars[type].value)) {
-    for (a in vars[type].value) {
+    for ( var a in vars[type].value ) {
       get_keys(vars[type].value[a],type == "data")
     }
   }
   else {
     get_keys(vars[type].value,type == "data")
   }
-
-  if (vars.dev.value) d3plus.console.timeEnd("key analysis")
 
 }
 
@@ -850,7 +853,7 @@ d3plus.data.nest = function(vars,flat_data,levels,grouped) {
         var nest_obj = d3plus.variable.value(vars,leaves[0],nest_key)
         to_return[nest_key] = nest_obj
 
-        for (key in vars.data.keys) {
+        for ( var key in vars.data.keys ) {
           if (((levels.indexOf(nest_key) >= 0 && levels.indexOf(key) <= levels.indexOf(nest_key)) || (vars.id.nesting.indexOf(nest_key) >= 0 && vars.id.nesting.indexOf(key) <= vars.id.nesting.indexOf(nest_key)))
             && key in leaves[0]
             && (!vars.active.value || key != vars.active.value) && key != "d3plus") {
@@ -906,7 +909,7 @@ d3plus.data.nest = function(vars,flat_data,levels,grouped) {
       }
       keys[levels[depth]] = obj.key
       delete obj.key
-      for (k in keys) {
+      for ( var k in keys ) {
         obj[k] = keys[k]
       }
       depth++
@@ -1068,7 +1071,7 @@ d3plus.data.restrict = function( vars ) {
 
     }
 
-    for (y in vars.data[data]) {
+    for ( var y in vars.data[data] ) {
       vars.data.restricted[y] = vars.data[data][y].filter(nest_check)
     }
 
@@ -1102,9 +1105,9 @@ d3plus.data.restrict = function( vars ) {
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Merges data underneath the size threshold
 //-------------------------------------------------------------------
-d3plus.data.threshold = function(vars,split) {
+d3plus.data.threshold = function( vars , rawData , split ) {
 
-  if (!vars.size.threshold) {
+  if ( vars.size.threshold === false ) {
     var threshold = 0
   }
   else if (typeof vars.size.threshold === "number") {
@@ -1112,6 +1115,9 @@ d3plus.data.threshold = function(vars,split) {
   }
   else if (typeof d3plus.visualization[vars.type.value].threshold === "number") {
     var threshold = d3plus.visualization[vars.type.value].threshold
+  }
+  else if (typeof d3plus.visualization[vars.type.value].threshold === "function") {
+    var threshold = d3plus.visualization[vars.type.value].threshold(vars)
   }
   else {
     var threshold = 0.02
@@ -1155,9 +1161,9 @@ d3plus.data.threshold = function(vars,split) {
         largest[x] = total
         return total
       })
-      .entries(vars.data.app)
+      .entries(rawData)
 
-    vars.data.app = vars.data.app.filter(function(d){
+    var filteredData = rawData.filter(function(d){
 
       var id = d3plus.variable.value(vars,d,vars.id.value),
           val = d3plus.variable.value(vars,d,vars.size.value),
@@ -1216,7 +1222,7 @@ d3plus.data.threshold = function(vars,split) {
         }
       })
 
-      if (vars.color.value && vars.color.type == "string") {
+      if (vars.color.value && vars.color.type === "string") {
         if (vars.depth.value == 0) {
           m[vars.color.value] = vars.color.missing
         }
@@ -1259,9 +1265,116 @@ d3plus.data.threshold = function(vars,split) {
 
     })
 
-    vars.data.app = vars.data.app.concat(merged)
+    return filteredData.concat(merged)
 
   }
+
+  return rawData
+
+}
+
+//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+// Load Data using JSON
+//------------------------------------------------------------------------------
+d3plus.data.url = function( vars , key , next ) {
+
+  var url = vars[key].url
+
+  if ( !vars[key].type.value ) {
+
+    var fileType = url.slice(url.length-5).split(".")
+    if ( fileType.length > 1 ) {
+      fileType = fileType[1]
+    }
+    else {
+      fileType = false
+    }
+
+    if ( fileType ) {
+
+      if ( fileType === "txt" ) {
+        fileType = "text"
+      }
+      if ( vars[key].type.accepted.indexOf(fileType) < 0 ) {
+        fileType = "json"
+      }
+
+    }
+    else {
+      fileType = "json"
+    }
+
+  }
+  else {
+    var fileType = vars[key].type.value
+  }
+
+  if ( fileType === "dsv" ) {
+    var parser = d3.dsv( vars[key].delimiter.value , "text/plain" )
+  }
+  else {
+    var parser = d3[fileType]
+  }
+
+  parser( url , function( error , data ) {
+
+    if (!error && data) {
+
+      if (typeof vars[key].callback === "function") {
+
+        var ret = vars[key].callback(data)
+
+        if (ret) {
+          if ( d3plus.object.validate(ret) && key in ret) {
+            for ( var k in ret ) {
+              if (k in vars) {
+                vars[k].value = ret[k]
+              }
+            }
+          }
+          else {
+            vars[key].value = ret
+          }
+        }
+
+      }
+      else {
+
+        vars[key].value = data
+
+      }
+
+      if ( fileType !== "json" ) {
+
+        vars[key].value.forEach(function(d){
+
+          for ( var k in d ) {
+
+            if      ( d[k].toLowerCase() === "false" ) d[k] = false
+            else if ( d[k].toLowerCase() === "true" ) d[k] = true
+            else if ( d[k].toLowerCase() === "null" ) d[k] = null
+            else if ( d[k].toLowerCase() === "undefined" ) d[k] = undefined
+
+          }
+
+
+        })
+
+      }
+
+      vars[key].changed = true
+      vars[key].loaded = true
+
+    }
+    else {
+
+      vars.internal_error = "Could not load data from: \""+url+"\""
+
+    }
+
+    next()
+
+  })
 
 }
 
@@ -1305,7 +1418,7 @@ d3plus.font.validate = function(test_fonts) {
   if (!(test_fonts instanceof Array)) {
     test_fonts = test_fonts.split(",")
   }
-  
+
   var fontString = test_fonts.join(", ")
     , completed = d3plus.font.validate.complete
 
@@ -1338,7 +1451,7 @@ d3plus.font.validate = function(test_fonts) {
   var monospace = create_element("monospace"),
       proportional = create_element("sans-serif")
 
-  for (font in test_fonts) {
+  for ( var font in test_fonts ) {
 
     var family = test_fonts[font].trim()
 
@@ -1408,40 +1521,10 @@ d3plus.form = function() {
       //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
       // Sort the data, if needed.
       //------------------------------------------------------------------------
-      if ( vars.order.value && (vars.data.changed || vars.order.changed || vars.order.sort.changed) ) {
+      if ( vars.data.changed || vars.order.changed || vars.order.sort.changed ) {
 
-        var sort = vars.order.value || vars.id.value
-          , order = vars.order.sort.value
-
-        vars.data.value.sort(function(a,b){
-
-          a = a[sort]
-          b = b[sort]
-
-          if (sort === vars.color.value) {
-
-            a = d3.rgb(a_value).hsl()
-            b = d3.rgb(b_value).hsl()
-
-            if (a.s == 0) a = 361
-            else a = a.h
-            if (b.s == 0) b = 361
-            else b = b.h
-
-          }
-
-          if (typeof a === "string") {
-            a = a.toLowerCase()
-          }
-
-          if (typeof b === "string") {
-            b = b.toLowerCase()
-          }
-
-          if(a < b) return order === "asc" ? -1 : 1;
-          if(a > b) return order === "asc" ? 1 : -1;
-
-        })
+        d3plus.array.sort( vars.data.value , vars.order.value || vars.text.value
+                         , vars.order.sort.value , vars.color.value , vars )
 
       }
 
@@ -1500,7 +1583,7 @@ d3plus.form = function() {
           options
             .each(function(d){
 
-              for (k in d) {
+              for ( var k in d ) {
                 if ( k === vars.text.value ) {
                   d3.select(this).html(d[k])
                 }
@@ -1602,14 +1685,15 @@ d3plus.form = function() {
       //------------------------------------------------------------------------
       if ( vars.data.value.length ) {
 
-        if (vars.dev.value) d3plus.console.group("drawing \""+vars.type.value+"\"")
+        var app = vars.format.locale.value.visualization[vars.type.value]
+        if (vars.dev.value) d3plus.console.group("drawing "+ app)
         d3plus.input[vars.type.value]( vars )
         if (vars.dev.value) d3plus.console.groupEnd()
 
       }
       else if ( vars.data.url && (!vars.data.loaded || vars.data.stream) ) {
 
-        d3plus.data.json( vars , "data" , vars.self.draw )
+        d3plus.data.url( vars , "data" , vars.self.draw )
 
       }
 
@@ -1629,7 +1713,7 @@ d3plus.form = function() {
                 , "focus" , "format" , "height" , "hover" , "icon" , "id"
                 , "keywords" , "open" , "order" , "remove" , "search"
                 , "select" , "selectAll" , "text" , "title" , "type" , "width" ]
-    , styles  = [ "font" , "icon" , "timing" , "title" , "ui" ]
+    , styles  = [ "data" , "font" , "icon" , "timing" , "title" , "ui" ]
 
   d3plus.method( vars , methods , styles )
 
@@ -1673,6 +1757,16 @@ d3plus.console.log = function( message , style ) {
 d3plus.console.comment = function( message , style ) {
 
   var style = style || "color:#aaa;font-weight:normal;"
+
+  this( "log" , message , style )
+
+}
+
+d3plus.console.error = function( message , style ) {
+
+  var style = style || "color:#ff0000;font-weight:bold;"
+
+  message = "ERROR: " + message
 
   this( "log" , message , style )
 
@@ -1866,9 +1960,9 @@ d3plus.locale.en = {
     "connections"  : "no connections available for {0}.",
     "data"         : "no data available",
     "dataYear"     : "no data available for {0}.",
-    "lib"          : "{0} visualizations require loading the {0} library.",
+    "lib"          : "{0} visualizations require loading the {1} library.",
     "libs"         : "{0} visualizations require loading the following libraries: {1}.",
-    "method"       : "{0} visualizations require setting the {0} method.",
+    "method"       : "{0} visualizations require setting the {1} method.",
     "methods"      : "{0} visualizations require setting the following methods: {1}."
 
   },
@@ -1970,6 +2064,136 @@ d3plus.locale.en = {
     "scatter"      : "Scatter Plot",
     "stacked"      : "Stacked Area",
     "tree_map"     : "Tree Map"
+
+  }
+
+}
+
+d3plus.locale.mk = {
+
+  "dev"          : {
+
+    "accepted"     : "{0} не е прифатенa вредноста за {1}, ве молиме користете еднa од следниве вредности: {2}.",
+    "deprecated"   : "{0} е застарена, ве молиме обновете го вашиот код за да се користи {1}.",
+    "noChange"     : "{0} не е ажурирана, бидејќи немаше промени.",
+    "noContainer"  : "не можe да се најде контејнер на страницата кој се совпаѓа со {0}.",
+    "of"           : "на",
+    "oldStyle"     : "својствата за стилот за {0} сега се вградени директно во. {1} ().",
+    "sameEdge"     : "рабовите не може да имаат алка самите кон себе. автоматски ги отстранувам рабовите кои се само-референцираат {0}.",
+    "set"          : "{0} е наместен..",
+    "setLong"      : "{0} е поставен на {1}.",
+    "setContainer" : "Ве молиме дефинирајте контејнер div користејќи .container()"
+
+  },
+
+  "error"        : {
+
+    "accepted"     : "{0} не е прифатлива за {1} {2} визуелизација, ве молиме користете една од следниве: {3}.",
+    "connections"  : "нема конекции на располагање за {0}.",
+    "data"         : "нема податоци",
+    "dataYear"     : "Нема достапни податоци за {0}.",
+    "lib"          : "{0} визуализации бараат вчитување на библиотеката {1} .",
+    "libs"         : "{0} визуализации бараат вчитување на следниве библиотеки: {1}.",
+    "method"       : "{0} визуализации бара поставување на {1} методот.",
+    "methods"      : "{0} визуализации бараат поставување на следниве методи: {1}."
+
+  },
+
+  "lowercase"    : [ "a"
+                   , "и"
+                   , "во"
+                   , "но"
+                   , "на"
+                   , "или"
+                   , "да"
+                   , "се"
+                   , "со"
+  ],
+
+  "message"      : {
+
+    "data"         : "анализирање на податоците",
+    "draw"         : "цртање на визуелизација",
+    "initializing" : "иницијализација {0}",
+    "loading"      : "вчитување на податоци",
+    "tooltipReset" : "ресетирање на објаснувањата",
+    "ui"           : "ажурирање на кориничкиот интерфејс"
+
+  },
+
+  "method"       : {
+
+    "active"       : "активни сегменти",
+    "color"        : "боја",
+    "depth"        : "длабочина",
+    "dev"          : "опширно",
+    "focus"        : "фокус",
+    "icon"         : "икона",
+    "id"           : "ID",
+    "height"       : "висина",
+    "labels"       : "етикети",
+    "legend"       : "легенда",
+    "margin"       : "маргина",
+    "messages"     : "пораки за статусот",
+    "mode"         : "режим",
+    "order"        : "цел",
+    "search"       : "барај",
+    "shape"        : "форма",
+    "size"         : "големина",
+    "style"        : "стил",
+    "temp"         : "привремени сегменти",
+    "text"         : "текст",
+    "time"         : "време",
+    "timeline"     : "времеплов",
+    "total"        : "Вкупно сегменти",
+    "type"         : "тип",
+    "width"        : "ширина",
+    "x"            : "x оската",
+    "y"            : "y оската",
+    "zoom"         : "зум"
+
+  },
+
+  "time"         : [ "датум"
+                   , "ден"
+                   , "месец"
+                   , "време"
+                   , "година"
+  ],
+
+  "ui"           : {
+
+    "and"          : "и",
+    "back"         : "назад",
+    "collapse"     : "кликни за да се собере",
+    "error"        : "грешка",
+    "expand"       : "кликни за да се прошири",
+    "loading"      : "Се вчитува ...",
+    "more"         : "{0} повеќе",
+    "moreInfo"     : "кликнете за повеќе информации",
+    "noResults"    : "Нема резултати за појавување на {0}.",
+    "primary"      : "основно врски",
+    "share"        : "удел",
+    "total"        : "Вкупно",
+    "values"       : "вредности"
+
+  },
+
+  "uppercase"    : [ "tv"
+                   , "ui"
+  ],
+
+  "visualization": {
+
+    "bubbles"      : "Меурчиња",
+    "chart"        : "Табела",
+    "geo_map"      : "Гео мапа",
+    "line"         : "Линиски график",
+    "network"      : "Мрежа",
+    "rings"        : "Прстени",
+    "scatter"      : "Распрскан график",
+    "stacked"      : "Наредена површина",
+    "tree_map"     : "Мапа во вид на дрво"
 
   }
 
@@ -2141,10 +2365,10 @@ d3plus.method = function( vars , methods , styles ) {
       vars[m] = {}
     }
 
-    vars[m] = d3plus.util.merge( d3plus.method[m] , vars[m] )
+    vars[m] = d3plus.object.merge( d3plus.method[m] , vars[m] )
 
     if ( styles.indexOf(m) >= 0 ) {
-      vars[m] = d3plus.util.merge( initStyle[m] , vars[m] )
+      vars[m] = d3plus.object.merge( initStyle[m] , vars[m] )
       styles.splice(styles.indexOf(m),1)
     }
 
@@ -2168,7 +2392,7 @@ d3plus.method = function( vars , methods , styles ) {
     //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     // Clone style defaults.
     //--------------------------------------------------------------------------
-    vars[m] = d3plus.util.copy(initStyle[m])
+    vars[m] = d3plus.object.merge( vars[m] || {} , initStyle[m] )
 
     //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     // Run initialization on all inner properties.
@@ -2185,11 +2409,260 @@ d3plus.method = function( vars , methods , styles ) {
 }
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+// Formats numbers to look "pretty"
+//------------------------------------------------------------------------------
+d3plus.number.format = function( number , key , vars ) {
+
+  if ( !vars && "getVars" in this) {
+    var vars = this.getVars()
+  }
+
+  if ( vars && key && (
+       ( key === vars.x.value && vars.x.scale.value === "log" ) ||
+       ( key === vars.y.value && vars.y.scale.value === "log" ) ) ) {
+
+    var superscript = "⁰¹²³⁴⁵⁶⁷⁸⁹"
+      , formatPower = function(d) {
+          return (d + "").split("").map(function(c) {
+            return superscript[c]
+          }).join("")
+        }
+
+    return 10 + " " + formatPower( Math.round(Math.log(number) / Math.LN10) )
+
+  }
+
+  if ( "locale" in this ) {
+    var locale = this.locale.value
+      , time = locale.time
+  }
+  else {
+    var locale = d3plus.locale.en
+      , time = locale.time
+  }
+
+  if ( vars && typeof vars.time.value === "string") {
+    time.push(vars.time.value)
+  }
+
+  if (key && time.indexOf(key.toLowerCase()) >= 0) {
+    return number
+  }
+  else if (number < 10 && number > -10) {
+    return d3.round(number,2)
+  }
+  else if (number.toString().split(".")[0].length > 4) {
+    var symbol = d3.formatPrefix(number).symbol
+    symbol = symbol.replace("G", "B") // d3 uses G for giga
+
+    // Format number to precision level using proper scale
+    number = d3.formatPrefix(number).scale(number)
+    number = parseFloat(d3.format(".3g")(number))
+    return number + symbol;
+  }
+  else if (key == "share") {
+    return d3.format(".2f")(number)
+  }
+  else {
+    return d3.format(",f")(number)
+  }
+
+}
+
+//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+// Merge two objects to create a new one with the properties of both
+//------------------------------------------------------------------------------
+d3plus.object.merge = function(obj1, obj2) {
+
+  var obj3 = {};
+
+  function copy_object(obj,ret) {
+
+    for ( var a in obj ) {
+
+      if (typeof obj[a] != "undefined") {
+
+        if ( d3plus.object.validate(obj[a]) ) {
+
+          if (typeof ret[a] !== "object") ret[a] = {}
+          copy_object(obj[a],ret[a])
+
+        }
+        else if ( !d3plus.util.d3selection(obj[a])
+                  && obj[a] instanceof Array ) {
+
+          ret[a] = obj[a].slice(0)
+
+        }
+        else {
+
+          ret[a] = obj[a]
+
+        }
+
+      }
+
+    }
+
+  }
+
+  if (obj1) copy_object(obj1,obj3)
+  if (obj2) copy_object(obj2,obj3)
+
+  return obj3;
+}
+
+//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Checks to see if the passed object has keys and is not an array.
 //------------------------------------------------------------------------------
 d3plus.object.validate = function( obj ) {
 
   return obj !== null && typeof obj === "object" && !(obj instanceof Array)
+
+}
+
+//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+// Formats a string similar to Python's "format"
+//------------------------------------------------------------------------------
+d3plus.string.format = function() {
+
+  var args = Array.prototype.slice.call(arguments)
+    , str = args.shift()
+
+  str.unkeyed_index = 0;
+  return str.replace(/\{(\w*)\}/g, function(match, key) {
+      if (key === '') {
+          key = str.unkeyed_index;
+          str.unkeyed_index++
+      }
+      if (key == +key) {
+          return args[key] !== 'undefined'
+              ? args[key]
+              : match;
+      } else {
+          for (var i = 0; i < args.length; i++) {
+              if (typeof args[i] === 'object' && typeof args[i][key] !== 'undefined') {
+                  return args[i][key];
+              }
+          }
+          return match;
+      }
+  }.bind(str));
+
+}
+
+//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+// Converts an array of strings into a string list using commas and "and".
+//------------------------------------------------------------------------------
+d3plus.string.list = function( list , and ) {
+
+  if ( !and ) {
+    var and = d3plus.locale.en.ui.and
+  }
+
+  if (list.length == 2) {
+    return list.join(" "+and+" ")
+  }
+  else {
+    list[list.length-1] = and+" "+list[list.length-1]
+    return list.join(", ")
+  }
+
+}
+
+//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+// Removes all non ASCII characters
+//------------------------------------------------------------------------------
+d3plus.string.strip = function(str) {
+
+  var removed = [ "!","@","#","$","%","^","&","*","(",")",
+                  "[","]","{","}",".",",","/","\\","|",
+                  "'","\"",";",":","<",">","?","=","+"]
+  str += ""
+
+  return ""+str.replace(/[^A-Za-z0-9\-_]/g, function(chr) {
+
+    if (" " == chr) {
+      return "_"
+    }
+    else if (removed.indexOf(chr) >= 0) {
+      return ""
+    }
+
+    var diacritics = [
+        [/[\300-\306]/g, "A"],
+        [/[\340-\346]/g, "a"],
+        [/[\310-\313]/g, "E"],
+        [/[\350-\353]/g, "e"],
+        [/[\314-\317]/g, "I"],
+        [/[\354-\357]/g, "i"],
+        [/[\322-\330]/g, "O"],
+        [/[\362-\370]/g, "o"],
+        [/[\331-\334]/g, "U"],
+        [/[\371-\374]/g, "u"],
+        [/[\321]/g, "N"],
+        [/[\361]/g, "n"],
+        [/[\307]/g, "C"],
+        [/[\347]/g, "c"],
+    ];
+
+    var ret = ""
+
+    for ( var d in diacritics ) {
+
+      if (diacritics[d][0].test(chr)) {
+        ret = diacritics[d][1]
+        break;
+      }
+
+    }
+
+    return ret;
+
+  });
+
+}
+
+//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+// Formats numbers to look "pretty"
+//------------------------------------------------------------------------------
+d3plus.string.title = function( text , key , vars ) {
+
+  if (!text) {
+    return ""
+  }
+
+  if ( "locale" in this ) {
+    var locale = this.locale.value
+    if ( typeof locale === "string" ) {
+      locale = locale in d3plus.locale
+             ? d3plus.locale[locale] : d3plus.locale.en
+    }
+  }
+  else {
+    var locale = d3plus.locale.en
+  }
+
+  if ( text.charAt(text.length-1) === "." ) {
+    return text.charAt(0).toUpperCase() + text.substr(1)
+  }
+
+  var smalls = locale.lowercase,
+      bigs   = locale.uppercase
+
+  return text.replace(/\w\S*/g, function(txt,i){
+
+    if ( bigs.indexOf(txt.toLowerCase()) >= 0 ) {
+      return txt.toUpperCase()
+    }
+    else if ( smalls.indexOf(txt.toLowerCase()) >= 0
+              && i !== 0 && i !== text.length-1 ) {
+      return txt.toLowerCase()
+    }
+
+    return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()
+
+  })
 
 }
 
@@ -2945,9 +3418,9 @@ d3plus.tooltip.data = function(vars,id,length,extras,depth) {
   var extra_data = {}
   if (extras && typeof extras == "string") extras = [extras]
   else if (extras && typeof extras == "object") {
-    extra_data = d3plus.util.merge(extra_data,extras)
+    extra_data = d3plus.object.merge(extra_data,extras)
     var extras = []
-    for (k in extra_data) {
+    for ( var k in extra_data ) {
       extras.push(k)
     }
   }
@@ -2979,7 +3452,7 @@ d3plus.tooltip.data = function(vars,id,length,extras,depth) {
         a = []
       }
       else {
-        a = d3plus.util.merge({"":[]},a)
+        a = d3plus.object.merge({"":[]},a)
       }
 
     }
@@ -2988,7 +3461,7 @@ d3plus.tooltip.data = function(vars,id,length,extras,depth) {
       a = [a]
     }
     else if (!(a instanceof Array)) {
-      a = d3plus.util.merge({"":[]},a)
+      a = d3plus.object.merge({"":[]},a)
     }
 
   }
@@ -3053,7 +3526,7 @@ d3plus.tooltip.data = function(vars,id,length,extras,depth) {
 
     if (vars.tooltip.value.long && typeof vars.tooltip.value.long == "object") {
       var placed = []
-      for (group in vars.tooltip.value.long) {
+      for ( var group in vars.tooltip.value.long ) {
 
         extras.forEach(function(e){
           if (vars.tooltip.value.long[group].indexOf(e) >= 0 && ((a[group] && a[group].indexOf(e) < 0) || !a[group])) {
@@ -3075,7 +3548,7 @@ d3plus.tooltip.data = function(vars,id,length,extras,depth) {
     }
     else {
       var present = []
-      for (group in a) {
+      for ( var group in a ) {
         extras.forEach(function(e){
           if (a[group] instanceof Array && a[group].indexOf(e) >= 0) {
             present.push(e)
@@ -3102,7 +3575,7 @@ d3plus.tooltip.data = function(vars,id,length,extras,depth) {
       delete a[""]
     }
 
-    for (group in a) {
+    for ( var group in a ) {
       if (a[group] instanceof Array) {
         a[group].forEach(function(t){
           format_key(t,group)
@@ -3343,12 +3816,26 @@ d3plus.util.closest = function(arr,value) {
 }
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-// Clones an object, removing any edges to the original
+// Clones a variable
 //------------------------------------------------------------------------------
-d3plus.util.copy = function(obj) {
+d3plus.util.copy = function( variable ) {
 
-  return d3plus.util.merge(obj)
-  
+  if ( d3plus.object.validate(variable) ) {
+    return d3plus.object.merge(variable)
+  }
+  else if ( variable instanceof Array ) {
+
+    var ret = []
+    variable.forEach(function(o){
+      ret.push(d3plus.util.copy(o))
+    })
+    return ret
+
+  }
+  else {
+    return variable
+  }
+
 }
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -3410,79 +3897,6 @@ d3plus.util.distances = function(arr,accessor) {
   })
 
   return distances
-}
-
-//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-// Formats a string similar to Python's "format"
-//------------------------------------------------------------------------------
-d3plus.util.format = function() {
-
-  var args = Array.prototype.slice.call(arguments)
-    , str = args.shift()
-
-  str.unkeyed_index = 0;
-  return str.replace(/\{(\w*)\}/g, function(match, key) {
-      if (key === '') {
-          key = str.unkeyed_index;
-          str.unkeyed_index++
-      }
-      if (key == +key) {
-          return args[key] !== 'undefined'
-              ? args[key]
-              : match;
-      } else {
-          for (var i = 0; i < args.length; i++) {
-              if (typeof args[i] === 'object' && typeof args[i][key] !== 'undefined') {
-                  return args[i][key];
-              }
-          }
-          return match;
-      }
-  }.bind(str));
-
-}
-
-//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-// Merge two objects to create a new one with the properties of both
-//------------------------------------------------------------------------------
-d3plus.util.merge = function(obj1, obj2) {
-
-  var obj3 = {};
-
-  function copy_object(obj,ret) {
-
-    for (var a in obj) {
-
-      if (typeof obj[a] != "undefined") {
-
-        if ( d3plus.object.validate(obj[a]) ) {
-
-          if (typeof ret[a] !== "object") ret[a] = {}
-          copy_object(obj[a],ret[a])
-
-        }
-        else if ( !d3plus.util.d3selection(obj[a])
-                  && obj[a] instanceof Array ) {
-
-          ret[a] = obj[a].slice(0)
-
-        }
-        else {
-
-          ret[a] = obj[a]
-
-        }
-
-      }
-
-    }
-
-  }
-
-  if (obj1) copy_object(obj1,obj3)
-  if (obj2) copy_object(obj2,obj3)
-
-  return obj3;
 }
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -3584,58 +3998,6 @@ d3plus.util.offset = function(radians, distance, shape) {
 }
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-// Removes all non ASCII characters
-//------------------------------------------------------------------------------
-d3plus.util.strip = function(str) {
-
-  var removed = [ "!","@","#","$","%","^","&","*","(",")",
-                  "[","]","{","}",".",",","/","\\","|",
-                  "'","\"",";",":","<",">","?","=","+"]
-
-  return str.replace(/[^A-Za-z0-9\-_]/g, function(chr) {
-
-    if (" " == chr) {
-      return "_"
-    }
-    else if (removed.indexOf(chr) >= 0) {
-      return ""
-    }
-
-    var diacritics = [
-        [/[\300-\306]/g, "A"],
-        [/[\340-\346]/g, "a"],
-        [/[\310-\313]/g, "E"],
-        [/[\350-\353]/g, "e"],
-        [/[\314-\317]/g, "I"],
-        [/[\354-\357]/g, "i"],
-        [/[\322-\330]/g, "O"],
-        [/[\362-\370]/g, "o"],
-        [/[\331-\334]/g, "U"],
-        [/[\371-\374]/g, "u"],
-        [/[\321]/g, "N"],
-        [/[\361]/g, "n"],
-        [/[\307]/g, "C"],
-        [/[\347]/g, "c"],
-    ];
-
-    var ret = ""
-
-    for (d in diacritics) {
-
-      if (diacritics[d][0].test(chr)) {
-        ret = diacritics[d][1]
-        break;
-      }
-
-    }
-
-    return ret;
-
-  });
-
-}
-
-//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Returns list of unique values
 //------------------------------------------------------------------------------
 d3plus.util.uniques = function(data,value) {
@@ -3645,7 +4007,7 @@ d3plus.util.uniques = function(data,value) {
   }
 
   var type = null
-  
+
   return d3.nest().key(function(d) {
       if (typeof value == "string") {
         if (!type && typeof d[value] !== "undefined") type = typeof d[value]
@@ -3668,7 +4030,7 @@ d3plus.util.uniques = function(data,value) {
       }
       return a
     },[]).sort(function(a,b){
-      return a - b
+      return a < b ? -1 : 1
     })
 
 }
@@ -3934,7 +4296,7 @@ d3plus.variable.text = function(vars,obj,depth) {
 d3plus.variable.value = function(vars,id,variable,id_var,agg) {
 
   if (!id_var) {
-    if (variable && typeof variable == "object") {
+    if ( d3plus.object.validate(variable) ) {
       if (variable[vars.id.value]) {
         var id_var = vars.id.value
       }
@@ -3948,11 +4310,11 @@ d3plus.variable.value = function(vars,id,variable,id_var,agg) {
     }
   }
 
-  if (variable && typeof variable == "function") {
+  if ( variable && typeof variable === "function" ) {
     return variable(id)
   }
-  else if (variable == id_var) {
-    if (typeof id == "object") {
+  else if (variable === id_var) {
+    if ( d3plus.object.validate(id) ) {
       return id[variable]
     }
     else {
@@ -3978,10 +4340,10 @@ d3plus.variable.value = function(vars,id,variable,id_var,agg) {
     }
   }
 
-  if (typeof id == "object" && typeof id[variable] != "undefined") {
+  if ( d3plus.object.validate(id) && variable in id ) {
     return id[variable]
   }
-  else if (typeof id == "object" && id.children) {
+  else if ( d3plus.object.validate(id) && id.children ) {
 
     if (!agg) {
       var agg = "sum"
@@ -4008,16 +4370,17 @@ d3plus.variable.value = function(vars,id,variable,id_var,agg) {
   }
   else {
 
-    if (typeof id == "object") {
+    if ( typeof id == "object" ) {
       var dat = id
       id = id[id_var]
     }
 
-    if (vars.data.app instanceof Array) {
-      var dat = filter_array(vars.data.app)
+    if ( vars.data.app instanceof Array ) {
+      var dat = filter_array( vars.data.app )
     }
 
-    if (dat && typeof dat[variable] != "undefined") return dat[variable]
+    if ( dat && variable in dat ) return dat[variable]
+
   }
 
   if (vars.attrs.value instanceof Array) {
@@ -4035,7 +4398,7 @@ d3plus.variable.value = function(vars,id,variable,id_var,agg) {
     var attr = vars.attrs.value[id]
   }
 
-  if (attr && typeof attr[variable] != "undefined") return attr[variable]
+  if ( attr && variable in attr ) return attr[variable]
 
   return null
 
@@ -4070,19 +4433,33 @@ d3plus.viz = function() {
       vars.small = small_width || small_height
 
       if (vars.error.value) {
+
+      var timing = vars.draw.timing
+
+        vars.group.transition().duration(timing)
+          .attr("opacity",0)
+        vars.g.data.transition().duration(timing)
+          .attr("opacity",0)
+        vars.g.edges.transition().duration(timing)
+          .attr("opacity",0)
+
         vars.messages.style = "large"
         var message = vars.error.value === true
                     ? vars.format.value(vars.format.locale.value.ui.error)
                     : vars.error.value
         if (vars.dev.value) d3plus.console.warning(message)
+        var lastMessage = message
         d3plus.ui.message(vars,message)
+
       }
       else {
 
         var steps = d3plus.draw.steps(vars)
 
         vars.container.value.style("cursor","wait")
-        vars.messages.style = vars.data.app ? "small" : "large"
+        vars.messages.style = vars.group && vars.group.attr("opacity") === "1"
+                            ? "small" : "large"
+
         function check_next() {
 
           if (steps.length) {
@@ -4098,7 +4475,7 @@ d3plus.viz = function() {
         function run_steps() {
 
           var step = steps.shift(),
-              same = vars.g.message && vars.g.message.text() === step.message,
+              same = vars.g.message && lastMessage === step.message,
               run = "check" in step ? step.check(vars) : true
 
           if (run) {
@@ -4109,8 +4486,11 @@ d3plus.viz = function() {
                 d3plus.console.groupEnd()
                 d3plus.console.group(step.message)
               }
+              lastMessage = typeof vars.messages.value === "string"
+                          ? vars.messages.value
+                          : step.message
               var message = typeof vars.messages.value === "string"
-                          ? vars.messages.value 
+                          ? vars.messages.value
                           : vars.format.value(step.message)
 
               d3plus.ui.message(vars,message)
@@ -4441,8 +4821,10 @@ d3plus.input.toggle = function( vars ) {
       vars.self.focus(value)
 
     })
+    .order(vars.order)
     .ui({
       "border": vars.ui.border,
+      "color": vars.ui.color,
       "display": "inline-block",
       "margin": 0,
       "padding": vars.ui.padding
@@ -4548,7 +4930,7 @@ d3plus.method.function = function( key , vars ) {
 
       for ( var s in user ) {
 
-        d3plus.console.warning(d3plus.util.format(str,"\""+s+"\"",s))
+        d3plus.console.warning(d3plus.string.format(str,"\""+s+"\"",s))
         d3plus.console.log(d3plus.repo+"wiki/Methods")
 
         vars.self[s](user[s])
@@ -4635,7 +5017,7 @@ d3plus.method.init = function( vars , obj , method ) {
     obj.value = d3plus.method.process( obj , obj.value )
   }
 
-  for ( o in obj ) {
+  for ( var o in obj ) {
 
     if ( o === "deprecates" ) {
 
@@ -4649,7 +5031,7 @@ d3plus.method.init = function( vars , obj , method ) {
 
             var str = vars.format.locale.value.dev.deprecated
             dep = "\."+dep+"()"
-            d3plus.console.warning(d3plus.util.format(str,dep,"\."+n+"()"))
+            d3plus.console.error(d3plus.string.format(str,dep,"\."+n+"()"))
             d3plus.console.log(d3plus.repo+"wiki/Methods")
             return vars.self;
 
@@ -4863,6 +5245,7 @@ d3plus.method.set = function( vars , method , object , key , value ) {
       var str = vars.format.locale.value.dev.accepted
         , recs = []
         , val = "\""+JSON.stringify(value)+"\""
+        , and = vars.format.locale.value.ui.and
 
       accepted.forEach(function(a){
 
@@ -4875,7 +5258,8 @@ d3plus.method.set = function( vars , method , object , key , value ) {
 
       })
 
-      d3plus.console.warning(d3plus.util.format(str,val,text,recs.join(", ")))
+      recs = d3plus.string.list(recs,and)
+      d3plus.console.warning(d3plus.string.format(str,val,text,recs))
 
     }
 
@@ -4913,7 +5297,7 @@ d3plus.method.set = function( vars , method , object , key , value ) {
          || ( object[key] && object[key] === value ) ) && value !== undefined ) {
 
       var str = vars.format.locale.value.dev.noChange
-      if (vars.dev.value) d3plus.console.comment(d3plus.util.format(str,text))
+      if (vars.dev.value) d3plus.console.comment(d3plus.string.format(str,text))
 
     }
     else {
@@ -4961,7 +5345,7 @@ d3plus.method.set = function( vars , method , object , key , value ) {
 
             }
 
-            object.nesting = d3plus.util.merge( object.nesting , value )
+            object.nesting = d3plus.object.merge( object.nesting , value )
 
             if ( !(vars.id.value in object.nesting) ) {
               object.nesting[vars.id.value] = value[d3.keys(value)[0]]
@@ -5028,7 +5412,7 @@ d3plus.method.set = function( vars , method , object , key , value ) {
       }
       else if ( d3plus.object.validate(object[key]) && d3plus.object.validate(value) ) {
 
-        object[key] = d3plus.util.merge( object[key] , value )
+        object[key] = d3plus.object.merge( object[key] , value )
 
       }
       else {
@@ -5085,13 +5469,13 @@ d3plus.method.set = function( vars , method , object , key , value ) {
         if (valString !== null && valString.length < 260) {
 
           var str = vars.format.locale.value.dev.setLong
-          d3plus.console.log(d3plus.util.format(str,text,"\""+valString+"\""))
+          d3plus.console.log(d3plus.string.format(str,text,"\""+valString+"\""))
 
         }
         else {
 
           var str = vars.format.locale.value.dev.set
-          d3plus.console.log(d3plus.util.format(str,text))
+          d3plus.console.log(d3plus.string.format(str,text))
 
         }
 
@@ -5140,6 +5524,15 @@ d3plus.method.alt = {
 
 d3plus.method.attrs = {
   "accepted" : [ false , Array , Object , String ],
+  "delimiter" : {
+    "accepted" : [ String ],
+    "value"    : "|"
+  },
+  "type"     : {
+    "accepted" : [ false , "json" , "xml" ,"html"
+                 , "csv" , "dsv" , "tsv" , "txt" ],
+    "value"    : false
+  },
   "value"    : false
 }
 
@@ -5198,6 +5591,10 @@ d3plus.method.coords = {
   "mute"     : d3plus.method.filter(false),
   "process"  : d3plus.method.processData,
   "solo"     : d3plus.method.filter(false),
+  "type"     : {
+    "accepted" : [ "json" ],
+    "value"    : "json"
+  },
   "value"    : false
 }
 
@@ -5224,7 +5621,7 @@ d3plus.method.csv = {
         titles = [],
         title = vars.title.value || "My D3plus App Data"
 
-    title = d3plus.util.strip(title)
+    title = d3plus.string.strip(title)
 
     if (!columns) {
       var columns = [vars.id.value]
@@ -5281,6 +5678,10 @@ d3plus.method.csv = {
 
 d3plus.method.data = {
   "accepted" : [ false , Array , Function , String ],
+  "delimiter" : {
+    "accepted" : [ String ],
+    "value"    : "|"
+  },
   "process"  : function( value ) {
 
     var vars = this.getVars()
@@ -5290,6 +5691,11 @@ d3plus.method.data = {
     }
 
     return d3plus.method.processData( value , this )
+  },
+  "type"     : {
+    "accepted" : [ false , "json" , "xml" ,"html"
+                 , "csv" , "dsv" , "tsv" , "txt" ],
+    "value"    : false
   },
   "value"    : false
 }
@@ -5336,7 +5742,7 @@ d3plus.method.draw = {
     else if ( vars.container.value.empty() ) {
 
       var str = vars.format.locale.value.dev.noContainer
-      d3plus.console.warning(d3plus.util.format(str,"\""+vars.container.value+"\""))
+      d3plus.console.warning(d3plus.string.format(str,"\""+vars.container.value+"\""))
 
     }
     else {
@@ -5410,11 +5816,20 @@ d3plus.method.edges = {
     return objects ? targets : connections
 
   },
+  "delimiter" : {
+    "accepted" : [ String ],
+    "value"    : "|"
+  },
   "label"       : false,
   "process"     : d3plus.method.processData,
   "size"        : false,
   "source"      : "source",
   "target"      : "target",
+  "type"     : {
+    "accepted" : [ false , "json" , "xml" ,"html"
+                 , "csv" , "dsv" , "tsv" , "txt" ],
+    "value"    : false
+  },
   "value"       : false
 }
 
@@ -5493,7 +5908,7 @@ d3plus.method.format = {
         , returnObject  = d3plus.locale[defaultLocale]
 
       if ( value !== defaultLocale ) {
-        returnObject = d3plus.util.merge( returnObject , d3plus.locale[value] )
+        returnObject = d3plus.object.merge( returnObject , d3plus.locale[value] )
       }
 
       return returnObject
@@ -5501,40 +5916,7 @@ d3plus.method.format = {
     },
     "value"    : "en"
   },
-  "number"     : function( number , key ) {
-
-    var time = this.locale.value.time
-
-    if ("getVars" in this) {
-      var vars = this.getVars()
-      if ( typeof vars.time.value === "string" ) {
-        time.push(vars.time.value)
-      }
-    }
-
-    if (key && time.indexOf(key.toLowerCase()) >= 0) {
-      return number
-    }
-    else if (number < 10 && number > -10) {
-      return d3.round(number,2)
-    }
-    else if (number.toString().split(".")[0].length > 4) {
-      var symbol = d3.formatPrefix(number).symbol
-      symbol = symbol.replace("G", "B") // d3 uses G for giga
-
-      // Format number to precision level using proper scale
-      number = d3.formatPrefix(number).scale(number)
-      number = parseFloat(d3.format(".3g")(number))
-      return number + symbol;
-    }
-    else if (key == "share") {
-      return d3.format(".2f")(number)
-    }
-    else {
-      return d3.format(",f")(number)
-    }
-
-  },
+  "number"     : d3plus.number.format,
   "process"    : function( value ) {
 
     if ( typeof value === "string" ) {
@@ -5548,30 +5930,7 @@ d3plus.method.format = {
     return this.value
 
   },
-  "text"       : function( text , key ) {
-
-    if (!text) {
-      return ""
-    }
-
-    var smalls = this.locale.value.lowercase,
-        bigs   = this.locale.value.uppercase
-
-    return text.replace(/\w\S*/g, function(txt,i){
-
-      if ( bigs.indexOf(txt.toLowerCase()) >= 0 ) {
-        return txt.toUpperCase()
-      }
-      else if ( smalls.indexOf(txt.toLowerCase()) >= 0
-                && i !== 0 && i !== text.length-1 ) {
-        return txt.toLowerCase()
-      }
-
-      return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase()
-
-    })
-
-  },
+  "text"       : d3plus.string.title,
   "value"      : function( value , key ) {
 
     if ( typeof value === "number" ) {
@@ -5665,14 +6024,6 @@ d3plus.method.labels = {
 
 d3plus.method.legend = {
   "accepted" : [ Boolean ],
-  "order"    : {
-    "accepted" : [ "color" , "id" , "size" , "text" ],
-    "sort"     : {
-      "accepted" : [ "asc" , "desc" ],
-      "value"    : "asc"
-    },
-    "value"    : "color"
-  },
   "value"    : true
 }
 
@@ -5771,7 +6122,16 @@ d3plus.method.messages = {
 
 d3plus.method.nodes = {
   "accepted" : [ false , Array , Function , String ],
+  "delimiter" : {
+    "accepted" : [ String ],
+    "value"    : "|"
+  },
   "process"  : d3plus.method.processData,
+  "type"     : {
+    "accepted" : [ false , "json" , "xml" ,"html"
+                 , "csv" , "dsv" , "tsv" , "txt" ],
+    "value"    : false
+  },
   "value"    : false
 }
 
@@ -5927,10 +6287,10 @@ d3plus.method.timeline = {
 }
 
 d3plus.method.title = {
-  "accepted" : [ Boolean , Function , String ],
+  "accepted" : [ false , Function , String ],
   "link"     : false,
   "sub"      : {
-    "accepted"   : [ String ],
+    "accepted"   : [ false , String ],
     "deprecates" : "sub_title",
     "link"       : false,
     "value"      : false,
@@ -5946,7 +6306,7 @@ d3plus.method.title = {
     var vars = this.getVars()
 
     if ( vars.container.id.indexOf("default") === 0 && value ) {
-      var id = d3plus.util.strip(value).toLowerCase()
+      var id = d3plus.string.strip(value).toLowerCase()
       vars.self.container({"id": id})
     }
 
@@ -6118,7 +6478,8 @@ d3plus.draw.app = function(vars) {
 
   if (!vars.internal_error) {
 
-    if (vars.dev.value) d3plus.console.group("Calculating \"" + vars.type.value + "\"")
+    var app = vars.format.locale.value.visualization[vars.type.value]
+    if (vars.dev.value) d3plus.console.group("running "+ app)
     var returned = d3plus.visualization[vars.type.value](vars)
     if (vars.dev.value) d3plus.console.groupEnd();
 
@@ -6175,6 +6536,7 @@ d3plus.draw.container = function(vars) {
     var sizes = ["width","height"]
     sizes.forEach(function(s){
       if (!vars[s].value) {
+
         function check_parent(element) {
 
           if (element.tagName === undefined || ["BODY","HTML"].indexOf(element.tagName) >= 0) {
@@ -6213,6 +6575,7 @@ d3plus.draw.container = function(vars) {
           }
 
         }
+
         check_parent(vars.container.value.node())
       }
     })
@@ -6417,12 +6780,14 @@ d3plus.draw.errors = function(vars) {
   if ( missing.length > 1 ) {
     var str = vars.format.locale.value.error.methods
       , app = vars.format.locale.value.visualization[vars.type.value]
-    vars.internal_error = d3plus.util.format(str,app,missing.join(", "))
+      , and = vars.format.locale.value.ui.and
+    missing = d3plus.string.list(missing,and)
+    vars.internal_error = d3plus.string.format(str,app,missing)
   }
   else if ( missing.length === 1 ) {
     var str = vars.format.locale.value.error.method
       , app = vars.format.locale.value.visualization[vars.type.value]
-    vars.internal_error = d3plus.util.format(str,app,missing[0])
+    vars.internal_error = d3plus.string.format(str,app,missing[0])
   }
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -6433,7 +6798,7 @@ d3plus.draw.errors = function(vars) {
     if (connections.length == 0) {
       var name = d3plus.variable.text(vars,vars.focus.value,vars.depth.value)
         , str = vars.format.locale.value.error.connections
-      vars.internal_error = d3plus.util.format(str,"\""+name+"\"")
+      vars.internal_error = d3plus.string.format(str,"\""+name+"\"")
     }
   }
 
@@ -6452,12 +6817,14 @@ d3plus.draw.errors = function(vars) {
   if ( missing.length > 1 ) {
     var str = vars.format.locale.value.error.libs
       , app = vars.format.locale.value.visualization[vars.type.value]
-    vars.internal_error = d3plus.util.format(str,app,missing.join(", "))
+      , and = vars.format.locale.value.ui.and
+    missing = d3plus.string.list(missing,and)
+    vars.internal_error = d3plus.string.format(str,app,missing)
   }
   else if ( missing.length === 1 ) {
     var str = vars.format.locale.value.error.lib
       , app = vars.format.locale.value.visualization[vars.type.value]
-    vars.internal_error = d3plus.util.format(str,app,missing[0])
+    vars.internal_error = d3plus.string.format(str,app,missing[0])
   }
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -6472,12 +6839,12 @@ d3plus.draw.errors = function(vars) {
       , shape = "\""+vars.shape.value+"\""
       , shapeStr = vars.format.locale.value.method.shape
       , app = vars.format.locale.value.visualization[vars.type.value]
-    d3plus.console.warning(d3plus.util.format(str,shape,shapeStr,app,"\""+shapes+"\""))
+    d3plus.console.warning(d3plus.string.format(str,shape,shapeStr,app,"\""+shapes+"\""))
     vars.shape.previous = vars.shape.value
     vars.shape.value = d3plus.visualization[vars.type.value].shapes[0]
     var str = vars.format.locale.value.dev.setLong
       , shape = "\""+vars.shape.value+"\""
-    d3plus.console.warning(d3plus.util.format(str,shapeStr,shape))
+    d3plus.console.warning(d3plus.string.format(str,shapeStr,shape))
   }
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -6493,12 +6860,12 @@ d3plus.draw.errors = function(vars) {
         , mode = "\""+vars.type.mode.value+"\""
         , modeStr = vars.format.locale.value.method.mode
         , app = vars.format.locale.value.visualization[vars.type.value]
-      d3plus.console.warning(d3plus.util.format(str,mode,modeStr,app,"\""+modes+"\""))
+      d3plus.console.warning(d3plus.string.format(str,mode,modeStr,app,"\""+modes+"\""))
       vars.type.mode.previous = vars.type.mode.value
       vars.type.mode.value = d3plus.visualization[vars.type.value].modes[0]
       var str = vars.format.locale.value.dev.setLong
         , mode = "\""+vars.type.mode.value+"\""
-      d3plus.console.warning(d3plus.util.format(str,modeStr,mode))
+      d3plus.console.warning(d3plus.string.format(str,modeStr,mode))
     }
   }
 
@@ -6640,6 +7007,7 @@ d3plus.draw.finish = function(vars) {
   // Display and reset internal_error, if applicable
   //----------------------------------------------------------------------------
   if (vars.internal_error) {
+    vars.internal_error = d3plus.string.title( vars.internal_error )
     d3plus.console.warning(vars.internal_error)
     d3plus.ui.message(vars,vars.internal_error)
     vars.internal_error = null
@@ -6848,7 +7216,7 @@ d3plus.draw.steps = function(vars) {
 
       steps.push({
         "function": function(vars,next){
-          d3plus.data.json(vars,u,next)
+          d3plus.data.url(vars,u,next)
         },
         "message": vars.format.locale.value.message.loading,
         "wait": true
@@ -6875,7 +7243,7 @@ d3plus.draw.steps = function(vars) {
   //----------------------------------------------------------------------------
   var msg = vars.format.locale.value.message.initializing
     , app = vars.format.locale.value.visualization[vars.type.value]
-  msg = d3plus.util.format(msg,app)
+  msg = d3plus.string.format(msg,app)
   steps.push({
     "check": function(vars) {
       return vars.draw.update
@@ -6935,7 +7303,9 @@ d3plus.draw.steps = function(vars) {
         vars.nodes.restricted = null
         vars.edges.restricted = null
 
+        if (vars.dev.value) d3plus.console.time("data key analysis")
         d3plus.data.keys(vars,"data")
+        if (vars.dev.value) d3plus.console.timeEnd("data key analysis")
 
       },
       "message": vars.format.locale.value.message.data
@@ -6950,7 +7320,9 @@ d3plus.draw.steps = function(vars) {
       },
       "function": function(vars) {
 
+        if (vars.dev.value) d3plus.console.time("attribute key analysis")
         d3plus.data.keys(vars,"attrs")
+        if (vars.dev.value) d3plus.console.timeEnd("attribute key analysis")
 
       },
       "message": vars.format.locale.value.message.data
@@ -6965,7 +7337,13 @@ d3plus.draw.steps = function(vars) {
         return (!vars.edges.linked || vars.edges.changed)
           && edge_req && vars.edges.value
       },
-      "function": d3plus.data.edges,
+      "function": function(vars) {
+
+        if (vars.dev.value) d3plus.console.time("formatting edges")
+        d3plus.data.edges(vars)
+        if (vars.dev.value) d3plus.console.timeEnd("formatting edges")
+
+      },
       "message": vars.format.locale.value.message.data
     })
     steps.push({
@@ -6974,7 +7352,13 @@ d3plus.draw.steps = function(vars) {
         return node_req && (!vars.nodes.positions || vars.nodes.changed)
           && vars.nodes.value && vars.edges.value
       },
-      "function": d3plus.data.nodes,
+      "function": function(vars) {
+
+        if (vars.dev.value) d3plus.console.time("formatting nodes")
+        d3plus.data.nodes(vars)
+        if (vars.dev.value) d3plus.console.timeEnd("formatting nodes")
+
+      },
       "message": vars.format.locale.value.message.data
     })
 
@@ -7064,6 +7448,46 @@ d3plus.draw.steps = function(vars) {
     })
 
     //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    // Determine color type
+    //--------------------------------------------------------------------------
+    steps.push({
+      "function": function(vars) {
+
+          if (vars.color.changed && vars.color.value) {
+
+            if ( d3plus.object.validate(vars.color.value) ) {
+              if (vars.color.value[vars.id.value]) {
+                var color_id = vars.color.value[vars.id.value]
+              }
+              else {
+                var color_id = vars.color.value[d3.keys(vars.color.value)[0]]
+              }
+            }
+            else {
+              var color_id = vars.color.value
+            }
+
+            if (vars.data.keys && color_id in vars.data.keys) {
+              vars.color.type = vars.data.keys[color_id]
+            }
+            else if (vars.attrs.keys && color_id in vars.attrs.keys) {
+              vars.color.type = vars.attrs.keys[color_id]
+            }
+            else {
+              vars.color.type = undefined
+            }
+
+          }
+          else if (!vars.color.value) {
+            vars.color.type = "keys" in vars.data
+                            ? vars.data.keys[vars.id.value] : false
+          }
+
+      },
+      "message": vars.format.locale.value.message.data
+    })
+
+    //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     // Fetch the correct Data for the App
     //--------------------------------------------------------------------------
     steps.push({
@@ -7088,37 +7512,7 @@ d3plus.draw.steps = function(vars) {
     steps.push({
       "check": function(vars) {
 
-        if (vars.color.changed && vars.color.value) {
-
-          if (typeof vars.color.value == "object") {
-            if (vars.color.value[vars.id.value]) {
-              var color_id = vars.color.value[vars.id.value]
-            }
-            else {
-              var color_id = vars.color.value[d3.keys(vars.color.value)[0]]
-            }
-          }
-          else {
-            var color_id = vars.color.value
-          }
-
-          if (vars.data.keys && color_id in vars.data.keys) {
-            vars.color.type = vars.data.keys[color_id]
-          }
-          else if (vars.attrs.keys && color_id in vars.attrs.keys) {
-            vars.color.type = vars.attrs.keys[color_id]
-          }
-          else {
-            vars.color.type = undefined
-          }
-
-        }
-        else if (!vars.color.value) {
-          vars.color.type = "keys" in vars.data
-                          ? vars.data.keys[vars.id.value] : false
-        }
-
-        return vars.color.value && vars.color.type == "number" &&
+        return vars.color.value && vars.color.type === "number" &&
                vars.id.nesting.indexOf(vars.color.value) < 0 &&
                vars.data.value && vars.color.value != vars.id.value &&
                  (vars.color.changed || vars.data.changed || vars.depth.changed ||
@@ -7131,7 +7525,7 @@ d3plus.draw.steps = function(vars) {
       "function": d3plus.data.color,
       "message": vars.format.locale.value.message.data,
       "otherwise": function(vars) {
-        if (vars.color.type != "number") {
+        if (vars.color.type !== "number") {
           vars.color.scale = null
         }
       }
@@ -7402,7 +7796,7 @@ d3plus.shape.color = function(d,vars) {
   }
 
   if (d.d3plus.static) {
-    return d3plus.color.lighter(d3plus.variable.color(vars,d));
+    return d3plus.color.lighter(d3plus.variable.color(vars,d),.75);
   }
 
   var active = vars.active.value ? d3plus.variable.value(vars,d,vars.active.value) : d.d3plus.active,
@@ -7416,7 +7810,7 @@ d3plus.shape.color = function(d,vars) {
     return "#eee"
   }
   else {
-    return d3plus.color.lighter(d3plus.variable.color(vars,d),.4);
+    return d3plus.color.lighter(d3plus.variable.color(vars,d),.75);
   }
 
 }
@@ -7711,7 +8105,7 @@ d3plus.shape.draw = function(vars) {
       }
     })
 
-    d.d3plus.id = d3plus.util.strip(d.d3plus.id)
+    d.d3plus.id = d3plus.string.strip(d.d3plus.id)
 
     return d
   }
@@ -7771,9 +8165,9 @@ d3plus.shape.draw = function(vars) {
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Create groups by shape, apply data, and call specific shape drawing class.
   //----------------------------------------------------------------------------
-  for (shape in shapes) {
+  for (var shape in shapes) {
 
-    if (vars.dev.value) d3plus.console.group("Drawing \"" + shape + "\" groups")
+    if (vars.dev.value) d3plus.console.group("drawing \"" + shape + "\" groups")
 
     //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     // Bind Data to Groups
@@ -8040,9 +8434,10 @@ d3plus.shape.draw = function(vars) {
 
             if (vars.continuous_axis) {
 
-              var mouse = d3.event[vars.continuous_axis]
-                  positions = d3plus.util.uniques(d.values,function(x){return x.d3plus[vars.continuous_axis]}),
-                  closest = d3plus.util.closest(positions,mouse)
+              var index = vars.continuous_axis === "x" ? 0 : 1
+                , mouse = d3.mouse(vars.container.value.node())[index]
+                , positions = d3plus.util.uniques(d.values,function(x){return x.d3plus[vars.continuous_axis]})
+                , closest = d3plus.util.closest(positions,mouse)
 
               d.data = d.values[positions.indexOf(closest)]
               d.d3plus = d.values[positions.indexOf(closest)].d3plus
@@ -8081,9 +8476,10 @@ d3plus.shape.draw = function(vars) {
 
             if (vars.continuous_axis) {
 
-              var mouse = d3.event[vars.continuous_axis]
-                  positions = d3plus.util.uniques(d.values,function(x){return x.d3plus[vars.continuous_axis]}),
-                  closest = d3plus.util.closest(positions,mouse)
+              var index = vars.continuous_axis === "x" ? 0 : 1
+                , mouse = d3.mouse(vars.container.value.node())[index]
+                , positions = d3plus.util.uniques(d.values,function(x){return x.d3plus[vars.continuous_axis]})
+                , closest = d3plus.util.closest(positions,mouse)
 
               d.data = d.values[positions.indexOf(closest)]
               d.d3plus = d.values[positions.indexOf(closest)].d3plus
@@ -9776,14 +10172,6 @@ d3plus.shape.line = function(vars,selection,enter,exit) {
 
         if (!vars.draw.frozen) {
 
-          var mouse = d3.event[vars.continuous_axis]
-              positions = d3plus.util.uniques(d.values,function(x){return x.d3plus[vars.continuous_axis]}),
-              closest = d3plus.util.closest(positions,mouse)
-
-          var parent_data = d3.select(this.parentNode).datum()
-          parent_data.data = d.values[positions.indexOf(closest)]
-          parent_data.d3plus = d.values[positions.indexOf(closest)].d3plus
-
           d3.select(this.parentNode).selectAll("path.d3plus_line")
             .transition().duration(vars.timing.mouseevents)
             .style("stroke-width",vars.data.stroke.width*2)
@@ -9792,21 +10180,6 @@ d3plus.shape.line = function(vars,selection,enter,exit) {
             .transition().duration(vars.timing.mouseevents)
             .style("stroke-width",vars.data.stroke.width*2)
             .call(update,2)
-
-        }
-
-      })
-      .on(d3plus.evt.move,function(d){
-
-        if (!vars.draw.frozen) {
-
-          var mouse = d3.event.x,
-              positions = d3plus.util.uniques(d.values,function(x){return x.d3plus.x}),
-              closest = d3plus.util.closest(positions,mouse)
-
-          var parent_data = d3.select(this.parentNode).datum()
-          parent_data.data = d.values[positions.indexOf(closest)]
-          parent_data.d3plus = d.values[positions.indexOf(closest)].d3plus
 
         }
 
@@ -9823,10 +10196,6 @@ d3plus.shape.line = function(vars,selection,enter,exit) {
             .transition().duration(vars.timing.mouseevents)
             .style("stroke-width",vars.data.stroke.width)
             .call(update)
-
-          var parent_data = d3.select(this.parentNode).datum()
-          delete parent_data.data
-          delete parent_data.d3plus
 
         }
 
@@ -10106,12 +10475,8 @@ d3plus.visualization.bubbles = function(vars) {
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Sort Data
   //----------------------------------------------------------------------------
-  var order = vars.order.value || vars.size.value
-  vars.data.app.sort(function(a,b){
-    var a_value = d3plus.variable.value(vars,a,order)
-      , b_value = d3plus.variable.value(vars,b,order)
-    return vars.order.sort.value == "asc" ? a_value-b_value : b_value-a_value
-  })
+  d3plus.array.sort( vars.data.app , vars.order.value || vars.size.value
+                   , vars.order.sort.value , vars.color.value , vars )
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Calculate rows and columns
@@ -10227,8 +10592,8 @@ d3plus.visualization.bubbles = function(vars) {
     d.d3plus.r = d.r
   })
 
-  data.sort(function(a,b){
-    return a.depth-b.depth
+  data.sort(function( a , b ){
+    return a.depth - b.depth
   })
 
   var label_data = data.filter(function(d){
@@ -10696,7 +11061,7 @@ d3plus.visualization.chart = function(vars) {
     .attr("id","yaxis")
 
   // Enter X Axis Label
-  var xlabel = axes.selectAll("text#xlabel").data(["xlabel"])
+  var xlabel = axes.selectAll("text#xlabel").data(vars.small ? [] : ["xlabel"])
   xlabel.enter().append("text")
     .attr("id", "xlabel")
     .attr("x", vars.width.viz/2)
@@ -10707,9 +11072,10 @@ d3plus.visualization.chart = function(vars) {
     .attr("font-size",vars.labels.font.size)
     .attr("fill",vars.labels.font.color)
     .attr("text-anchor",vars.labels.font.align)
+  xlabel.exit().remove()
 
   // Enter Y Axis Label
-  var ylabel = axes.selectAll("text#ylabel").data(["ylabel"])
+  var ylabel = axes.selectAll("text#ylabel").data(vars.small ? [] : ["ylabel"])
   ylabel.enter().append("text")
     .attr("id", "ylabel")
     .attr("y", 15)
@@ -10721,6 +11087,7 @@ d3plus.visualization.chart = function(vars) {
     .attr("font-size",vars.labels.font.size)
     .attr("fill",vars.labels.font.color)
     .attr("text-anchor",vars.labels.font.align)
+  ylabel.exit().remove()
 
   // Enter Mouse Event Group
   var mouseevents = vars.group.selectAll("g#mouseevents").data(["mouseevents"])
@@ -10977,13 +11344,16 @@ d3plus.visualization.chart = function(vars) {
 
   })
 
+  var sort = vars.order.value ? vars.order.value : vars.continuous_axis
+           ? vars[vars.opp_axis].value : vars.size.value || vars.id.value
+
   if (["line","area"].indexOf(vars.shape.value) >= 0) {
 
     data = d3.nest()
       .key(function(d){
         var id = d3plus.variable.value(vars,d,vars.id.value),
             depth = d.d3plus.depth ? d.d3plus.depth : 0
-        return d3plus.util.strip(id)+"_"+depth+"_"+vars.shape.value
+        return d3plus.string.strip(id)+"_"+depth+"_"+vars.shape.value
       })
       .rollup(function(leaves){
 
@@ -11048,6 +11418,7 @@ d3plus.visualization.chart = function(vars) {
       .entries(data)
 
     data.forEach(function(d,i){
+
       vars.id.nesting.forEach(function(n,i){
         if (i <= vars.depth.value && !d[n]) {
           d[n] = d3plus.util.uniques(d.values,n).filter(function(unique){
@@ -11055,82 +11426,32 @@ d3plus.visualization.chart = function(vars) {
           })[0]
         }
       })
+
+      if ( !(sort in d) ) {
+        d[sort] = 0
+        d.values.forEach(function(v){
+          var val = d3plus.variable.value(vars,v,sort)
+          if (val) {
+            if (typeof val == "number") {
+              d[sort] += val
+            }
+            else {
+              d[sort] = val
+            }
+          }
+        })
+      }
+
     })
 
   }
 
-  var sort = null
-  if (vars.order.value) {
-    sort = vars.order.value
-  }
-  else if (vars.continuous_axis) {
-    sort = vars[vars.opp_axis].value
-  }
-  else if (vars.size.value) {
-    sort = vars.size.value
-  }
-
   if (sort) {
 
-    data.sort(function(a,b){
+    d3plus.array.sort( data , sort
+                     , vars.order.sort.value === "desc" ? "asc" : "desc"
+                     , vars.color.value || [] , vars )
 
-      if (a.values instanceof Array) {
-        a_value = 0
-        a.values.forEach(function(v){
-          var val = d3plus.variable.value(vars,v,sort)
-          if (val) {
-            if (typeof val == "number") {
-              a_value += val
-            }
-            else {
-              a_value = val
-            }
-          }
-        })
-      }
-      else {
-        a_value = d3plus.variable.value(vars,a,sort)
-      }
-
-      if (b.values instanceof Array) {
-        b_value = 0
-        b.values.forEach(function(v){
-          var val = d3plus.variable.value(vars,v,sort)
-          if (val) {
-            if (typeof val == "number") {
-              b_value += val
-            }
-            else {
-              b_value = val
-            }
-          }
-        })
-      }
-      else {
-        b_value = d3plus.variable.value(vars,b,sort)
-      }
-
-      if (vars.color.value && sort == vars.color.value) {
-
-        a_value = d3plus.variable.color(vars,a)
-        b_value = d3plus.variable.color(vars,b)
-
-        a_value = d3.rgb(a_value).hsl()
-        b_value = d3.rgb(b_value).hsl()
-
-        if (a_value.s == 0) a_value = 361
-        else a_value = a_value.h
-        if (b_value.s == 0) b_value = 361
-        else b_value = b_value.h
-
-      }
-
-      if(a_value<b_value) return vars.order.sort.value == "desc" ? -1 : 1;
-      if(a_value>b_value) return vars.order.sort.value == "desc" ? 1 : -1;
-
-      return 0;
-
-    });
   }
 
   if (vars.stacked_axis) {
@@ -11541,7 +11862,7 @@ d3plus.visualization.network = function(vars) {
     })[0]
 
     if (d) {
-      var obj = d3plus.util.merge(n,d)
+      var obj = d3plus.object.merge(n,d)
     }
     else {
       var obj = d3plus.util.copy(n)
@@ -11612,11 +11933,7 @@ d3plus.visualization.rings = function(vars) {
   var center = vars.data.app.filter(function(d){
     return d[vars.id.value] == vars.focus.value
   })[0]
-  
-  if (!center) {
-    center = {"d3plus": {}}
-    center[vars.id.value] = vars.focus.value
-  }
+
   center.d3plus.x = vars.width.viz/2
   center.d3plus.y = vars.height.viz/2
   center.d3plus.r = primaryRing*.65
@@ -11628,10 +11945,7 @@ d3plus.visualization.rings = function(vars) {
     var n = vars.data.app.filter(function(d){
       return d[vars.id.value] == c[vars.id.value]
     })[0]
-    if (!n) {
-      n = {"d3plus": {}}
-      n[vars.id.value] = c[vars.id.value]
-    }
+
     n.d3plus.edges = vars.edges.connections(n[vars.id.value],vars.id.value).filter(function(c){
       return c[vars.edges.source][vars.id.value] != vars.focus.value && c[vars.edges.target][vars.id.value] != vars.focus.value
     })
@@ -11645,61 +11959,22 @@ d3plus.visualization.rings = function(vars) {
   // Sort primary nodes by children (smallest to largest) and then by sort
   // order.
   //--------------------------------------------------------------------------
-  var sort = null
-  if (vars.order.value) {
-    sort = vars.order.value
-  }
-  else if (vars.color.value) {
-    sort = vars.color.value
-  }
-  else if (vars.size.value) {
-    sort = vars.size.value
-  }
-  else {
-    sort = vars.id.value
-  }
-
-  function sort_function(a,b){
-
-    a_value = d3plus.variable.value(vars,a,sort)
-    b_value = d3plus.variable.value(vars,b,sort)
-
-    if (vars.color.value && sort == vars.color.value) {
-
-      a_value = d3plus.variable.color(vars,a)
-      b_value = d3plus.variable.color(vars,b)
-
-      a_value = d3.rgb(a_value).hsl()
-      b_value = d3.rgb(b_value).hsl()
-
-      if (a_value.s == 0) a_value = 361
-      else a_value = a_value.h
-      if (b_value.s == 0) b_value = 361
-      else b_value = b_value.h
-
-    }
-    else {
-      a_value = d3plus.variable.value(vars,a,sort)
-      b_value = d3plus.variable.value(vars,b,sort)
-    }
-
-    if(a_value<b_value) return vars.order.sort.value == "desc" ? -1 : 1;
-    if(a_value>b_value) return vars.order.sort.value == "desc" ? 1 : -1;
-
-  }
+  var sort = vars.order.value || vars.color.value
+          || vars.size.value || vars.id.value
 
   primaries.sort(function(a,b){
 
     var lengthdiff = a.d3plus.edges.length - b.d3plus.edges.length
 
-    if (lengthdiff) {
+    if ( lengthdiff ) {
 
       return lengthdiff
 
     }
     else {
 
-      return sort_function(a,b)
+      return d3plus.array.sort( [a,b] , sort , vars.order.sort.value
+                              , vars.color.value || [] , vars)
 
     }
 
@@ -11742,7 +12017,8 @@ d3plus.visualization.rings = function(vars) {
     })
   })
 
-  primaries.sort(sort_function)
+  d3plus.array.sort( primaries , sort , vars.order.sort.value
+                   , vars.color.value || [] , vars)
 
   var offset = 0,
       radian = Math.PI*2,
@@ -11773,7 +12049,8 @@ d3plus.visualization.rings = function(vars) {
         , b = b[vars.edges.source][vars.id.value] == p[vars.id.value]
             ? b[vars.edges.target] : b[vars.edges.source]
 
-      return sort_function(a,b)
+      return d3plus.array.sort( [a,b] , sort , vars.order.sort.value
+                              , vars.color.value || [] , vars)
 
     })
 
@@ -11786,11 +12063,6 @@ d3plus.visualization.rings = function(vars) {
       var d = vars.data.app.filter(function(a){
         return a[vars.id.value] == c[vars.id.value]
       })[0]
-
-      if (!d) {
-        d = {"d3plus": {}}
-        d[vars.id.value] = c[vars.id.value]
-      }
 
       a = (angle-(s*children/2)+(s/2))+((s)*i)
       d.d3plus.radians = a
@@ -12076,12 +12348,7 @@ d3plus.visualization.rings = function(vars) {
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Visualization Settings and Helper Functions
 //------------------------------------------------------------------------------
-d3plus.visualization.rings.requirements = ["edges","focus"];
-d3plus.visualization.rings.tooltip = "static"
-d3plus.visualization.rings.shapes = ["circle","square","donut"];
-d3plus.visualization.rings.scale = 1
-d3plus.visualization.rings.nesting = false
-d3plus.visualization.rings.filter = function(vars,data) {
+d3plus.visualization.rings.filter       = function( vars , data ) {
 
   var primaries = vars.edges.connections(vars.focus.value,vars.id.value,true)
     , secondaries = []
@@ -12092,18 +12359,33 @@ d3plus.visualization.rings.filter = function(vars,data) {
 
   var connections = primaries.concat(secondaries)
     , ids = d3plus.util.uniques(connections,vars.id.value)
+    , returnData = []
 
-  if (data === undefined) {
-    return ids
-  }
+  ids.forEach(function(id){
 
-  return data.filter(function(d){
+    var d = data.filter(function(d){
+      return d[vars.id.value] === id
+    })[0]
 
-    return ids.indexOf(d[vars.id.value]) >= 0
+    if ( !d ) {
+      var obj = {"d3plus": {}}
+      obj[vars.id.value] = id
+      returnData.push(obj)
+    }
+    else {
+      returnData.push(d)
+    }
 
   })
 
+  return returnData
+
 }
+d3plus.visualization.rings.nesting      = false
+d3plus.visualization.rings.scale        = 1
+d3plus.visualization.rings.shapes       = [ "circle" , "square" , "donut" ]
+d3plus.visualization.rings.requirements = [ "edges" , "focus" ]
+d3plus.visualization.rings.tooltip      = "static"
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Scatterplot
@@ -12132,11 +12414,6 @@ d3plus.visualization.scatter.tooltip      = "static"
 d3plus.visualization.stacked = function(vars) {
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  // Merge data points below the threshold defined at the bottom of this file.
-  //----------------------------------------------------------------------------
-  d3plus.data.threshold(vars,vars.x.value)
-
-  //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // This visualization is an extention of the Chart visualization.
   //----------------------------------------------------------------------------
   return d3plus.visualization.chart(vars)
@@ -12146,9 +12423,17 @@ d3plus.visualization.stacked = function(vars) {
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Visualization Settings and Helper Functions
 //------------------------------------------------------------------------------
+d3plus.visualization.stacked.filter       = function( vars , data ) {
+
+  //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  // Merge data points below the threshold
+  //----------------------------------------------------------------------------
+  return d3plus.data.threshold( vars , data , vars.x.value )
+
+}
 d3plus.visualization.stacked.requirements = [ "data" , "x" , "y" ]
 
-d3plus.visualization.stacked.setup = function(vars) {
+d3plus.visualization.stacked.setup        = function(vars) {
 
   if (vars.dev.value) d3plus.console.time("setting local variables")
 
@@ -12183,18 +12468,15 @@ d3plus.visualization.stacked.setup = function(vars) {
 }
 
 d3plus.visualization.stacked.shapes       = [ "area" ]
-d3plus.visualization.stacked.threshold    = 0.03
+d3plus.visualization.stacked.threshold    = function( vars ) {
+  return 20 / vars.height.viz
+}
 d3plus.visualization.stacked.tooltip      = "static"
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Tree Map
 //------------------------------------------------------------------------------
 d3plus.visualization.tree_map = function(vars) {
-
-  //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  // Merge data points below the threshold defined at the bottom of this file.
-  //----------------------------------------------------------------------------
-  d3plus.data.threshold(vars)
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Group the data by each depth defined by the .id() method.
@@ -12207,7 +12489,7 @@ d3plus.visualization.tree_map = function(vars) {
 
       grouped_data.key(function(d){
 
-        return d[n]
+        return d3plus.variable.value(vars,d.d3plus,n)
 
       })
 
@@ -12215,7 +12497,15 @@ d3plus.visualization.tree_map = function(vars) {
 
   })
 
-  grouped_data = grouped_data.entries(vars.data.app)
+  var strippedData = []
+  vars.data.app.forEach(function(d){
+    strippedData.push({
+      "d3plus" : d,
+      "value"  : d3plus.variable.value(vars,d,vars.size.value)
+    })
+  })
+
+  grouped_data = grouped_data.entries(strippedData)
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Pass data through the D3js .treemap() layout.
@@ -12233,11 +12523,6 @@ d3plus.visualization.tree_map = function(vars) {
     .sort(function(a, b) {
 
       return a.value - b.value
-
-    })
-    .value(function(d) {
-
-      return d3plus.variable.value(vars,d,vars.size.value)
 
     })
     .nodes({
@@ -12269,13 +12554,18 @@ d3plus.visualization.tree_map = function(vars) {
     //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
     // Calculate the position, size, and share percentage of each square.
     //--------------------------------------------------------------------------
+    var returnData = []
     data.forEach(function(d){
 
-      d.d3plus.x = d.x+d.dx/2
-      d.d3plus.y = d.y+d.dy/2
-      d.d3plus.width = d.dx
-      d.d3plus.height = d.dy
-      d.d3plus.share = d.value/root.value
+      d.d3plus.d3plus = {
+        "x": d.x+d.dx/2,
+        "y": d.y+d.dy/2,
+        "width": d.dx,
+        "height": d.dy,
+        "share": d.value/root.value
+      }
+
+      returnData.push(d.d3plus)
 
     })
 
@@ -12284,18 +12574,28 @@ d3plus.visualization.tree_map = function(vars) {
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Return the data array.
   //----------------------------------------------------------------------------
-  return data
+  return returnData
 
 }
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Visualization Settings and Helper Functions
 //------------------------------------------------------------------------------
-d3plus.visualization.tree_map.modes        = [ "squarify" , "slice" 
+d3plus.visualization.tree_map.filter       = function( vars , data ) {
+
+  //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  // Merge data points below the threshold
+  //----------------------------------------------------------------------------
+  return d3plus.data.threshold( vars , data )
+
+}
+d3plus.visualization.tree_map.modes        = [ "squarify" , "slice"
                                            , "dice" , "slice-dice" ]
 d3plus.visualization.tree_map.requirements = [ "data" , "size" ]
 d3plus.visualization.tree_map.shapes       = [ "square" ]
-d3plus.visualization.tree_map.threshold    = 0.0005
+d3plus.visualization.tree_map.threshold    = function( vars ) {
+  return ( 40 * 40 ) / (vars.width.viz * vars.height.viz)
+}
 d3plus.visualization.tree_map.tooltip      = "follow"
 
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -12325,6 +12625,7 @@ d3plus.ui.drawer = function( vars ) {
     .style("text-align",vars.ui.align.value)
     .style("position","absolute")
     .style("width",vars.width.value-(vars.ui.padding*2)+"px")
+    .style("height","auto")
     .style(positionStyles)
 
   var ui = drawer.selectAll("div.d3plus_drawer_ui")
@@ -12383,8 +12684,12 @@ d3plus.ui.drawer = function( vars ) {
   })
 
   ui.exit().remove()
-  
-  vars.margin[position] += drawer.node().offsetHeight + buffer
+
+  var drawerHeight = drawer.node().offsetHeight
+
+  if ( drawerHeight ) {
+    vars.margin[position] += drawerHeight + buffer
+  }
 
 }
 
@@ -12506,7 +12811,7 @@ d3plus.ui.history = function(vars) {
           d3.select(this)
             .style("cursor","pointer")
             .transition().duration(vars.timing.mouseevents)
-              .style("color",d3plus.color.lighter(color))
+              .style("color",d3plus.color.lighter(color,.25))
 
         }
 
@@ -12553,7 +12858,7 @@ d3plus.ui.legend = function(vars) {
 
   if (!vars.small && vars.legend.value && key) {
 
-    if (vars.dev.value) d3plus.console.group("Calculating Legend")
+    if (vars.dev.value) d3plus.console.group("drawing legend")
 
     if (vars.data.keys && key in vars.data.keys) {
       var color_type = vars.data.keys[key]
@@ -12572,10 +12877,7 @@ d3plus.ui.legend = function(vars) {
       var color_groups = {},
           placed = []
 
-      if (typeof d3plus.visualization[vars.type.value].filter == "function") {
-        var data = d3plus.visualization[vars.type.value].filter(vars)
-      }
-      else if (vars.nodes.value && d3plus.visualization[vars.type.value].requirements.indexOf("nodes") >= 0) {
+      if ( vars.nodes.value && d3plus.visualization[vars.type.value].requirements.indexOf("nodes") >= 0 ) {
         var data = vars.nodes.restriced || vars.nodes.value
       }
       else {
@@ -12588,6 +12890,7 @@ d3plus.ui.legend = function(vars) {
         if (placed.indexOf(id) < 0) {
 
           var color = d3plus.variable.color(vars,d)
+
           if (!color_groups[color]) {
             color_groups[color] = []
           }
@@ -12720,41 +13023,8 @@ d3plus.ui.legend = function(vars) {
 
         if (vars.dev.value) d3plus.console.time("sorting colors")
 
-        var sort = vars.legend.order.sort.value
-
-        colors.sort(function(a,b){
-
-          if (vars.legend.order.value == "color") {
-
-            var a_value = a.color,
-                b_value = b.color
-
-            a_value = d3.rgb(a_value).hsl()
-            b_value = d3.rgb(b_value).hsl()
-
-            if (a_value.s == 0) a_value = 361
-            else a_value = a_value.h
-            if (b_value.s == 0) b_value = 361
-            else b_value = b_value.h
-
-          }
-          else if (vars.legend.order.value == "text") {
-
-            var a_value = a.name[0],
-                b_value = b.name[0]
-
-          }
-          else {
-
-            var a_value = a[vars.legend.order.value]
-              , b_value = b[vars.legend.order.value]
-
-          }
-
-          if(a_value < b_value) return sort == "asc" ? -1 : 1;
-          if(a_value > b_value) return sort == "asc" ? 1 : -1;
-
-        })
+        d3plus.array.sort( colors , vars.legend.order.value
+                         , vars.legend.order.sort.value , "color" , vars )
 
         if (vars.dev.value) d3plus.console.timeEnd("sorting colors")
 
@@ -12805,7 +13075,7 @@ d3plus.ui.legend = function(vars) {
 
               if (g.icon) {
 
-                var short_url = d3plus.util.strip(g.icon+"_"+g.color)
+                var short_url = d3plus.string.strip(g.icon+"_"+g.color)
 
                 var pattern = vars.defs.selectAll("pattern#"+short_url)
                   .data([short_url])
@@ -12975,18 +13245,11 @@ d3plus.ui.legend = function(vars) {
                     var more = names.length-4
                       , str = vars.format.locale.value.ui.more
                     names = names.slice(0,4)
-                    names[4] = d3plus.util.format(str,more)
+                    names[4] = d3plus.string.format(str,more)
                   }
 
                   var and = vars.format.locale.value.ui.and
-
-                  if (names.length == 2) {
-                    var description = names.join(" "+and+" ")
-                  }
-                  else {
-                    names[names.length-1] = and+" "+names[names.length-1]
-                    var description = names.join(", ")
-                  }
+                  var description = d3plus.string.list(names,and)
 
                 }
 
@@ -13760,25 +14023,24 @@ d3plus.ui.timeline = function(vars) {
 //------------------------------------------------------------------------------
 d3plus.ui.titles = function(vars) {
 
+  var total_key = vars.size.value ? vars.size.value
+    : vars.color.type === "number" ? vars.color.value : false
+
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // If there is no data or the title bar is not needed,
   // set the total value to 'null'
   //----------------------------------------------------------------------------
   if (!vars.data.app || !vars.title.total.value || vars.small) {
-    var total = null
+    var total = false
   }
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Otherwise, let's calculate it!
   //----------------------------------------------------------------------------
-  else {
+  else if (total_key) {
 
     if (vars.dev.value) {
-      d3plus.console.group("Calculating Total Value")
-      d3plus.console.time(vars.size.value)
+      d3plus.console.time("calculating total value")
     }
-
-    var total_key = vars.size.value ? vars.size.value
-      : vars.color.type == "number" ? vars.color.value : null
 
     if (vars.focus.value) {
       var total = vars.data.app.filter(function(d){
@@ -13788,7 +14050,7 @@ d3plus.ui.titles = function(vars) {
         return d3plus.variable.value(vars,d,total_key)
       })
     }
-    else if (total_key) {
+    else {
       var total = d3.sum(vars.data.pool,function(d){
         return d3plus.variable.value(vars,d,total_key)
       })
@@ -13839,10 +14101,12 @@ d3plus.ui.titles = function(vars) {
     }
 
     if (vars.dev.value) {
-      d3plus.console.timeEnd(vars.size.value)
-      d3plus.console.groupEnd()
+      d3plus.console.timeEnd("calculating total value")
     }
 
+  }
+  else {
+    var total = false
   }
 
 
@@ -13962,7 +14226,7 @@ d3plus.ui.titles = function(vars) {
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Enter Titles
   //----------------------------------------------------------------------------
-  if (vars.dev.value) d3plus.console.log("Drawing Titles")
+  if (vars.dev.value) d3plus.console.log("drawing Titles")
   var titles = vars.svg.selectAll("g.d3plus_title")
     .data(title_data,function(t){
       return t.type
@@ -14445,6 +14709,14 @@ d3plus.style.default.legend = {
   "gradient" : {
     "height" : 10
   },
+  "order"    : {
+    "accepted" : [ "color" , "id" , "size" , "text" ],
+    "sort"     : {
+      "accepted" : [ "asc" , "desc" ],
+      "value"    : "asc"
+    },
+    "value"    : "color"
+  },
   "size"     : [ 8 , 30 ]
 }
 
@@ -14491,7 +14763,8 @@ d3plus.style.default.messages = {
       "value"    : "none"
     },
     "weight"     : 200
-  }
+  },
+  "padding": 5
 }
 
 d3plus.style.default.nodes = {
@@ -14646,8 +14919,8 @@ d3plus.style.default.ui = {
           , primary = this.value
           , secondary = vars.ui.color.secondary.value
 
-        if ( !secondary || secondary === d3plus.color.darker(primary,0.05) ) {
-          vars.ui.color.secondary.value = d3plus.color.darker(value,0.05)
+        if ( !secondary || secondary === d3.rgb(primary).darker(2).toString() ) {
+          vars.ui.color.secondary.value = d3.rgb(value).darker(2).toString()
         }
 
         return value
@@ -14701,45 +14974,52 @@ d3plus.input.button.color = function ( elem , vars ) {
       if ( vars.focus.value !== d[vars.id.value] ) {
 
         if ( vars.hover.value === d[vars.id.value] ) {
-          d.d3plus_background = d3plus.color.darker(vars.ui.color.secondary.value,.05)
+          return d3plus.color.lighter(vars.ui.color.secondary.value,.25)
         }
         else {
-          d.d3plus_background = vars.ui.color.secondary.value
+          return vars.ui.color.secondary.value
         }
 
       }
       else {
 
         if ( vars.hover.value === d[vars.id.value] ) {
-          d.d3plus_background = d3plus.color.darker(vars.ui.color.primary.value,.025)
+          return d3.rgb(vars.ui.color.primary.value).darker(0.15).toString()
         }
         else {
-          d.d3plus_background = vars.ui.color.primary.value
+          return vars.ui.color.primary.value
         }
 
       }
 
-      return d.d3plus_background
     })
     .style("color",function(d){
 
-      var text_color = d3plus.color.text(d.d3plus_background),
-          image = d[vars.icon.value] && vars.data.value.length < vars.data.large
+      var image = d[vars.icon.value] && vars.data.value.length < vars.data.large
 
-      if (text_color != "#f7f7f7" && vars.focus.value == d[vars.id.value] && d[vars.color.value] && !image) {
-        return d3plus.color.legible(d[vars.color.value])
+      if ( vars.focus.value === d[vars.id.value] ) {
+        var opacity = 1
+      }
+      else {
+        var opacity = 0.75
       }
 
-      return text_color
+      if ( vars.focus.value === d[vars.id.value] && d[vars.color.value] && !image ) {
+        var color = d3plus.color.legible(d[vars.color.value])
+      }
+      else if ( vars.focus.value === d[vars.id.value] ) {
+        var color = d3plus.color.text(vars.ui.color.primary.value)
+      }
+      else {
+        var color = d3plus.color.text(vars.ui.color.secondary.value)
+      }
+
+      var color = d3.rgb(color)
+
+      return "rgba("+color.r+","+color.g+","+color.b+","+opacity+")"
 
     })
     .style("border-color",vars.ui.color.secondary.value)
-    .style("opacity",function(d){
-      if (vars.focus.value !== d[vars.id.value]) {
-        return 0.75
-      }
-      return 1
-    })
 
 }
 
@@ -14759,7 +15039,7 @@ d3plus.input.button.icons = function ( elem , vars ) {
 
       var children = []
 
-      if (d[vars.icon.value] && vars.data.value.length < vars.data.large) {
+      if (d[vars.icon.value] && vars.data.value.length <= vars.data.large) {
         children.push(vars.icon.value)
       }
 
@@ -14918,26 +15198,19 @@ d3plus.input.button.mouseevents = function ( elem , vars , color ) {
   elem
     .on(d3plus.evt.over,function(d,i){
 
-      if (vars.data.value.length === 1 || d.value !== vars.focus.value) {
+      vars.self.hover(d[vars.id.value])
 
-        vars.self.hover(d[vars.id.value])
+      if ( d3plus.ie || !vars.draw.timing ) {
 
-        if ( d3plus.ie || !vars.draw.timing ) {
-
-          d3.select(this).style("cursor","pointer")
-            .call( color , vars )
-
-        }
-        else {
-
-          d3.select(this).style("cursor","pointer")
-            .transition().duration(vars.timing.mouseevents)
-            .call( color , vars )
-        }
+        d3.select(this).style("cursor","pointer")
+          .call( color , vars )
 
       }
       else {
-        d3.select(this).style("cursor","auto")
+
+        d3.select(this).style("cursor","pointer")
+          .transition().duration(vars.timing.mouseevents)
+          .call( color , vars )
       }
 
     })
@@ -15094,7 +15367,7 @@ d3plus.input.drop.data = function ( vars ) {
   else if (vars.open.value) {
 
     var searchText  = vars.text.solo.value.length ? vars.text.solo.value[0] : ""
-      , searchWords = d3plus.util.strip(searchText.toLowerCase()).split("_")
+      , searchWords = d3plus.string.strip(searchText.toLowerCase()).split("_")
       , searchKeys  = [ vars.id.value
                       , vars.text.value
                       , vars.alt.value
@@ -15126,7 +15399,7 @@ d3plus.input.drop.data = function ( vars ) {
             }
             else {
 
-              var texts = d3plus.util.strip(text).split("_")
+              var texts = d3plus.string.strip(text).split("_")
 
               for (t in texts) {
 
@@ -15162,7 +15435,7 @@ d3plus.input.drop.data = function ( vars ) {
 
       var noData = {}
         , str = vars.format.value(vars.format.locale.value.ui.noResults)
-      noData[vars.text.value] = d3plus.util.format(str,"\""+searchText+"\"")
+      noData[vars.text.value] = d3plus.string.format(str,"\""+searchText+"\"")
       vars.data.filtered = [ noData ]
 
     }
@@ -15218,14 +15491,13 @@ d3plus.input.drop.element = function ( vars ) {
 //------------------------------------------------------------------------------
 d3plus.input.drop.height = function ( vars ) {
 
-  var buttonHeight = vars.container.button.container().node().offsetHeight
-    , position     = vars.container.value.node().getBoundingClientRect()
+  var button = vars.container.button.container().node().getBoundingClientRect()
 
-  vars.height.secondary = window.innerHeight - position.top
-                        - buttonHeight - vars.ui.padding*2
+  vars.height.secondary = window.innerHeight - button.bottom - vars.ui.margin
+                         - vars.ui.padding*2 - vars.ui.border*2
 
-  if ( vars.height.secondary < buttonHeight*3 ) {
-    vars.height.secondary = position.top-10
+  if ( vars.height.secondary < button.height*3 ) {
+    vars.height.secondary = button.top-10
     vars.self.open({"flipped": true})
   }
   else {
@@ -15296,10 +15568,7 @@ d3plus.input.drop.items = function ( vars ) {
       .font( vars.font.secondary )
       .id( vars.id.value )
       .icon( vars.icon.value )
-      .order( vars.order.value )
-      .order({
-        "sort": vars.order.sort.value
-      })
+      .order( vars.order )
       .text( vars.text.secondary.value || vars.text.value )
       .timing({
         "ui": vars.draw.timing
@@ -15670,7 +15939,7 @@ d3plus.input.drop.toggle = function ( vars ) {
 
   if ( vars.data.url && (!vars.data.loaded || vars.data.stream) ) {
     this.update( vars )
-    d3plus.data.json( vars , "data" ,  vars.self.draw )
+    d3plus.data.url( vars , "data" ,  vars.self.draw )
   }
   else if ( vars.data.value.length !== listLength ) {
     vars.self.draw()

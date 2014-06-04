@@ -186,9 +186,9 @@
     , gists = []
     , users = []
     , titles = {
-      "basic"    : "Getting Started",
-      "forms"    : "D3plus Forms",
-      "advanced" : "Visualization Techniques"
+      "basic"    : "Basics",
+      "forms"    : "Forms",
+      "advanced" : "Advanced"
     }
 
   if ("examples") {
@@ -1181,21 +1181,22 @@
 
       if ( order.length > 1 ) {
 
-        var toggles = [{"value": "all", "text": "All Examples"}]
-        order.forEach(function(type){
+        var toggles = [{"value": "all", "text": "All", "order": 1}]
+        order.forEach(function(type,i){
 
           var title = titles[type]
           || type.replace(/_/g," ").replace(/\w\S*/g, function(txt){
             return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
           })
 
-          toggles.push({"value": type, "text": title})
+          toggles.push({"value": type, "text": title, "order": i+2})
 
         })
 
-        d3plus.form()
+        var toggle = d3plus.form()
           .container(d3.select("#content").append("section").attr("id","toggle"))
           .data(toggles)
+          .order("order")
           .focus("all",function(value){
 
             d3.selectAll("section")
@@ -1208,11 +1209,15 @@
                 return ["toggle",value].indexOf(this.id) >= 0 ? "block" : "none"
 
               })
+
           })
           .font({
             "align": "center"
           })
-          .width(600)
+          .width(350)
+          .ui({
+            "padding": 2
+          })
           .draw()
 
       }
