@@ -47,7 +47,7 @@
   users.forEach(function(user){
     var url = "https://api.github.com/users/"
     url += user
-    url += "/gists?client_id={{site.github_api.id}}&client_secret={{site.github_api.secret}}"
+    url += "/gists?client_id={{site.github_api.id}}&client_secret={{site.github_api.secret}}&per_page=100"
     q.defer(d3.json,url)
   })
 
@@ -60,7 +60,8 @@
 
       var merged = []
       merged = merged.concat.apply(merged,data).filter(function(g){
-        if (g.public && gists.indexOf(g.id) >= 0 && g.id in categories) {
+        // console.log(g.id,categories)
+        if ( g.public && gists.indexOf(g.id) >= 0 && g.id in categories ) {
           g.category = categories[g.id]
           return true
         }
