@@ -691,9 +691,65 @@
       gists.push(gist)
     }
   
+    var url = "/examples/utilities/a39f0c3fc52804ee859a/index.html".split("/")
+      , user = ""
+      , layout = "example"
+    if (user != "" && users.indexOf(user) < 0) {
+      users.push(user)
+    }
+
+    if (layout && url.length == 5 && url[1] == "examples" && url[3] != "simple") {
+      var category = url[2]
+        , gist = url[3].split(".")[0]
+      categories[gist] = category
+      gists.push(gist)
+    }
+  
+    var url = "/examples/utilities/b3063df74711f4e69166/index.html".split("/")
+      , user = ""
+      , layout = "example"
+    if (user != "" && users.indexOf(user) < 0) {
+      users.push(user)
+    }
+
+    if (layout && url.length == 5 && url[1] == "examples" && url[3] != "simple") {
+      var category = url[2]
+        , gist = url[3].split(".")[0]
+      categories[gist] = category
+      gists.push(gist)
+    }
+  
     var url = "/index.html".split("/")
       , user = ""
       , layout = "default"
+    if (user != "" && users.indexOf(user) < 0) {
+      users.push(user)
+    }
+
+    if (layout && url.length == 5 && url[1] == "examples" && url[3] != "simple") {
+      var category = url[2]
+        , gist = url[3].split(".")[0]
+      categories[gist] = category
+      gists.push(gist)
+    }
+  
+    var url = "/node_modules/gulp-livereload/node_modules/tiny-lr/node_modules/faye-websocket/spec/server.crt".split("/")
+      , user = ""
+      , layout = ""
+    if (user != "" && users.indexOf(user) < 0) {
+      users.push(user)
+    }
+
+    if (layout && url.length == 5 && url[1] == "examples" && url[3] != "simple") {
+      var category = url[2]
+        , gist = url[3].split(".")[0]
+      categories[gist] = category
+      gists.push(gist)
+    }
+  
+    var url = "/node_modules/gulp-livereload/node_modules/tiny-lr/node_modules/faye-websocket/spec/server.key".split("/")
+      , user = ""
+      , layout = ""
     if (user != "" && users.indexOf(user) < 0) {
       users.push(user)
     }
