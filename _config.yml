@@ -5,13 +5,15 @@ markdown: kramdown
 gems:
 - jekyll-redirect-from
 
+permalink: /blog/:categories/:year/:month/:day/:title
+
 navigation:
 - text: Examples
   url: /examples/
 - text: Documentation
   url: https://github.com/alexandersimoes/d3plus/wiki
-- text: Workshops
-  url: /workshops/
+# - text: Blog
+#   url: /blog/
 - text: Download
   url: /d3plus.zip
 - text: Source

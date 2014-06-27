@@ -1,0 +1,39 @@
+---
+layout: default
+style: blog
+---
+
+{% if page.title or page.subtitle or site.description %}
+  {% assign header_page_html = null %}
+  {% capture header_page_html %}
+    <div class="page-header">
+      {% if page.title %}
+        <h1 class="post-title">{{ page.title }}</h1>
+      {% elsif site.description %}
+        <h1 class="post-title">{{ site.description }}</h1>
+      {% endif %}
+
+      {% if page.subtitle %}
+        <h3 class="post-snippet">{{ page.subtitle }}</h3>
+      {% endif %}
+      
+      {% if page.author %}
+        <div class="post-meta">
+          <span>
+            <a href="" class="avatar" title="Go to the profile of ">
+              <img src="{{ site.url }}/assets/img/people/{{ page.author|lower }}.gif" class="avatar-image" title="Alex Simoes">
+              <span class="avatar-span">{{ page.author|capitalize }}</span>
+            </a>
+          </span>
+          <span class="post-date">{{ page.date | date_to_string }}</span>
+        </div>
+      {% endif %}
+    </div>
+  {% endcapture %}
+  
+  {{ header_page_html | strip_newlines | remove:'	' }}
+{% endif %}
+
+<div class="post-content">
+  {{ content }}
+</div>
