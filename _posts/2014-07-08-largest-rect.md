@@ -3,29 +3,11 @@ layout: post
 title: Largest rectangle in a polygon
 subtitle: An approximation algorithm for finding the largest rectangle inside a non-convex polygon
 category: behind-the-scenes
-author: Daniel
+author: daniel
 tags:
   - algorithm
   - geometry
 ---
-<script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
-<script src="/assets/posts/largestRect/lib/coffee-script.js"></script>
-<script src="/assets/posts/largestRect/lib/d3.min.js"></script>
-<script src="/assets/posts/largestRect/lib/simplify.js"></script>
-<script src="/assets/posts/largestRect/src/index.coffee" type="text/coffeescript"></script>
-<script src="/assets/posts/largestRect/src/largestRect.coffee" type="text/coffeescript"></script>
-<style>
-.disabled {
-  pointer-events: none;
-  cursor: default;
-  text-decoration: none;
-  color: black;
-}
-
-.disabled:hover {
-  color: black;
-}
-</style>
 Note: There is an [interactive vizualization](#interactive) of the algorithm at the end of the post.
 
 In this blog post I'm going to explain an algorithm that we recently designed for finding the largest area rectangle of any orientation that lies inside a given polygon. An important application of this problem is label placement, e.g. names inside countries or labels in stacked area charts. Also, since the algorithm can find a rectangle of arbitrary aspect ratio, it can also be used to place wrapped paragraphs inside the polygons. The algorithm will be incorporated in `d3plus.geom` in the 1.4.0 release. 
@@ -107,3 +89,22 @@ Animation: Fast <input id="slider" type="range" min="1" max="10" step="0.1" valu
 
 [^nonconvex-algo2]: R. Molano et al. Finding the largest area rectangle of arbitrary orientation in a closed contour. Applied Mathematics and Computation 218.19 (2012).
 	
+
+<script type="text/javascript" src="https://cdn.mathjax.org/mathjax/latest/MathJax.js?config=TeX-AMS-MML_HTMLorMML"></script>
+<script src="/assets/posts/largestRect/lib/coffee-script.js"></script>
+<script src="/assets/posts/largestRect/lib/d3.min.js"></script>
+<script src="/assets/posts/largestRect/lib/simplify.js"></script>
+<script src="/assets/posts/largestRect/src/index.coffee" type="text/coffeescript"></script>
+<script src="/assets/posts/largestRect/src/largestRect.coffee" type="text/coffeescript"></script>
+<style>
+.disabled {
+  pointer-events: none;
+  cursor: default;
+  text-decoration: none;
+  color: black;
+}
+
+.disabled:hover {
+  color: black;
+}
+</style>
