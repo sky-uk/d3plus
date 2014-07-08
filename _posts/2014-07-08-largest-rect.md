@@ -4,6 +4,7 @@ title: Largest rectangle in a polygon
 subtitle: An approximation algorithm for finding the largest rectangle inside a non-convex polygon
 category: behind-the-scenes
 author: daniel
+author_url: https://twitter.com/dsmilkov
 tags:
   - algorithm
   - geometry
