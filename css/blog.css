@@ -76,3 +76,8 @@ ul.posts {
 table.highlighttable {
   width: 100%;
 }
+
+.footnotes {
+  border-top: 1px solid black;
+  font-size:12px;
+}
