@@ -64,7 +64,7 @@ d3.json "/assets/posts/largestRect/data/countryCoordinates.json", (error, data) 
       options = {vdebug:true}
       [rect, area, events] = largestRect poly, options
       drawEvents poly, rect, events
-  changeCountry 202
+  changeCountry 36
 
 # PLOTTING
 drawEvents = (poly, rect, events) ->

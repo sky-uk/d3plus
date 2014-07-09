@@ -16,6 +16,10 @@ Here is an example of a polygon with the largest rectangle shown in green:
 
 <img width="500" src="/assets/posts/largestRect/img/solution.png" />
 
+And here is a real-world example where this algorihtm is being used for label placement in a stacked area chart:
+
+<img width="500" src="/assets/posts/largestRect/img/stackedarea.png" />
+
 But before diving into how this algorithm works, let's look at some prior work. When the polygon is convex, i.e. every internal angle is less than or equal to 180 degrees, this problem is relatively easy to solve, meaning that there are fast algorithms that are guaranteed to find the optimal solution [^convex-algo1]<sup>, </sup>[^convex-algo2]. When the polygon is non-convex, however, there is no polynomial time solution. There is a fast algorithm for finding an axis-aligned rectangle [^nonconvex-algo1], but the best approximation algorithm for an arbitrary orientation is $$O(n^3)$$ complexity [^nonconvex-algo2]. 
 
 After looking at those papers, it wasn't clear to me how complicated their implementation will be and whether it will run fast in practice. So we decided to design our own approximation algorithm which takes a brute-force approach with extensive pruning. The basic steps of the algorithm are:
