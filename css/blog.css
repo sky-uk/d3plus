@@ -71,13 +71,37 @@ ul.posts {
 
 .post-content{
   margin: 40px 0 0 0;
+  padding: 0 200px 0 0;
+  position: relative;
+}
+
+.post-content > h2 {
+  margin: 80px 0 0 0;
 }
 
 table.highlighttable {
+  margin: 0 0 20px 0;
   width: 100%;
 }
 
 .footnotes {
   border-top: 1px solid black;
   font-size:12px;
+}
+
+aside {
+  font-size: small;
+  line-height: 1.2;
+  position: absolute;
+  right: 0;
+  width: 180px;
+}
+
+.step {
+  margin: 20px 0 0 0;
+}
+
+#disqus_thread {
+  margin: 20px 0 0 0;
+  width: 800px;
 }
