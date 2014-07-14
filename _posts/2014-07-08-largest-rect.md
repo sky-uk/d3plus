@@ -15,11 +15,11 @@ In this blog post I'm going to explain an algorithm that we recently designed fo
 
 Here is an example of a polygon with the largest rectangle shown in green:
 
-<img width="500" src="/assets/posts/largestRect/img/solution.png" />
+<img width="400" src="/assets/posts/largestRect/img/solution.png" />
 
 And here is a real-world example where this algorihtm is being used for label placement in a stacked area chart:
 
-<img width="500" src="/assets/posts/largestRect/img/stackedarea.png" />
+<img width="600" src="/assets/posts/largestRect/img/stackedarea.png" />
 
 But before diving into how this algorithm works, let's look at some prior work. When the polygon is convex, i.e. every internal angle is less than or equal to 180 degrees, this problem is relatively easy to solve, meaning that there are fast algorithms that are guaranteed to find the optimal solution [^convex-algo1]<sup>, </sup>[^convex-algo2]. When the polygon is non-convex, however, there is no polynomial time solution. There is a fast algorithm for finding an axis-aligned rectangle [^nonconvex-algo1], but the best approximation algorithm for an arbitrary orientation is $$O(n^3)$$ complexity [^nonconvex-algo2]. 
 
@@ -37,7 +37,7 @@ The user can specify an array of possible orientation angles, otherwise the algo
 
 Now that we've described the basic idea, let's dive a little deeper. At the beginning, the algorithm simplifies the polygon using a line simplification algorithm to reduce the number of points of the polygon while maintaining its shape. This pre-processing significantly speeds up the rest of the algorithm. For this particular task we used [Simplify.js](http://mourner.github.io/simplify-js/).
 
-<img width="500" src="/assets/posts/largestRect/img/simplify.png" />
+<img width="400" src="/assets/posts/largestRect/img/simplify.png" />
 
 Then the centers are pre-computed by generating random points inside the bounding box of the polygon and rejecting those that don't lie inside the polygon.
 
@@ -70,17 +70,12 @@ Finally, if the rectangle with the current width $$w$$ lies inside the polygon, 
 Interactive visualization
 ----------------------------
 
-Country:
-<select id="select-country"></select> |
-<a href="javascript:void(0);" class="playback" id="prev-country">Prev</a> |
-<a href="javascript:void(0);" class="playback" id="next-country">Next</a>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-Playback:
-<a href="javascript:void(0);" id="play">Play</a> |
-<a href="javascript:void(0);" class="playback" id="restart">Restart</a> |
-<a href="javascript:void(0);" id="next-step">Next step</a>
-&nbsp;&nbsp;&nbsp;&nbsp;&nbsp;
-Animation: Fast <input id="slider" type="range" min="1" max="10" step="0.1" value="2"/> Slow
+<strong>Country: </strong>
+<a href="javascript:void(0);" class="playback" id="prev-country">Prev</a> | <select id="select-country"></select> | <a href="javascript:void(0);" class="playback" id="next-country">Next</a>
+<br/>
+<strong>Playback: </strong><a href="javascript:void(0);" id="play">Play</a> | <a href="javascript:void(0);" class="playback" id="restart">Restart</a> | <a href="javascript:void(0);" id="next-step">Next step</a>
+<br/>
+<strong>Animation: </strong> Fast <input id="slider" type="range" min="1" max="10" step="0.1" value="2"/> Slow
 <hr/>
 <svg id="svg" name="svg"></svg>
 
