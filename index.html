@@ -3,18 +3,14 @@ layout: default
 users:
 - davelandry
 - alexandersimoes
-examples:
-  - tree_map/9029130
-  - scatter/9029781
-  - line/9037371
-  - stacked/9029462
-  - geo_map/9042807
-  - network/9042919
-  - rings/9034389
-  - tree_map/9860999
+style: blog
 ---
 
 <style>
+
+  div#content {
+    text-align: center;
+  }
 
   section#logo {
     display: block;
@@ -42,9 +38,20 @@ examples:
   }
 
   section {
-    margin: 75px auto 0px;
+    margin: 75px 3% 0px;
     text-align: center;
-    width: 800px;
+    width: 94%;
+  }
+
+  section.half {
+    display: inline-block;
+    margin: 15px 2%;
+    width: 45%;
+    vertical-align: top;
+  }
+
+  section.half .button.right {
+    top: 20px;
   }
 
   section h2 {
@@ -67,17 +74,12 @@ examples:
     display: inline-block;
   }
 
-  section#releases {
-    margin-top: 25px;
-  }
-
   section#releases div.body {
     display: inline-block;
     font-size: 12px;
     line-height: 15px;
-    margin-bottom: 10px;
     text-align: left;
-    width: 700px;
+    width: 90%;
   }
 
   section#releases div.body h2 {
@@ -86,6 +88,19 @@ examples:
 
   a.example {
     margin: 10px 10px 25px 10px !important;
+  }
+
+  .post {
+    padding: 10px 25px;
+    text-align: left;
+  }
+
+  .post-title > a {
+    font-size: 14px;
+  }
+
+  .post-snippet > p {
+    font-size: 12px;
   }
 
 </style>
@@ -137,7 +152,37 @@ examples:
 
 </section>
 
-<section id="releases">
+<section class="half" id="posts">
+
+    <h2 class="bar">Blog Posts</h2>
+
+    <a class="button right" href="/blog/" target="_blank">
+      All Posts <i class="fa fa-angle-right"></i>
+    </a>
+
+    {% for post in site.posts %}
+      <div class="post">
+        <h3 class="post-title">
+          <a href="{{ post.url }}" title="{{ post.title }}" data-action="open-post" >{{ post.title }}</a>
+        </h3>
+        <a class="post-snippet" href="{{ post.url }}">
+          <p>{{ post.content | strip_html | truncatewords:50}}</p>
+        </a>
+        <div class="post-meta">
+          <span>
+            <a href="" class="avatar" title="Go to the profile of ">
+              <img src="{{ site.url }}/assets/img/people/{{ post.author|lower }}.gif" class="avatar-image">
+              <span class="avatar-span">{{ post.author|capitalize }}</span>
+            </a>
+          </span>
+          <span class="post-date">{{ post.date | date_to_string }}</span>
+        </div>
+      </div>
+    {% endfor %}
+
+</section>
+
+<section class="half" id="releases">
 
     <h2 class="bar">Current Release</h2>
 
@@ -147,7 +192,7 @@ examples:
 
 </section>
 
-{% include examples.html container="examples" limit=8 %}
+{% include examples.html container="examples" limit=10 %}
 
 <script src="/js/showdown.js"></script>
 <script>

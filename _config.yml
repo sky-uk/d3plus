@@ -14,10 +14,10 @@ exclude:
 navigation:
 - text: Examples
   url: /examples/
+- text: Blog
+  url: /blog/
 - text: Documentation
   url: https://github.com/alexandersimoes/d3plus/wiki
-# - text: Blog
-#   url: /blog/
 - text: Download
   url: /d3plus.zip
 - text: Source
