@@ -7,6 +7,10 @@ gems:
 
 permalink: /blog/:categories/:year/:month/:day/:title
 
+exclude:
+- node_modules
+- tests
+
 navigation:
 - text: Examples
   url: /examples/
