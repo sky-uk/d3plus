@@ -60,13 +60,13 @@
 .highlight .il { color: #009999 } /* Literal.Number.Integer.Long */
 
 
-.highlight { 
+.highlight {
   overflow: hidden;
 }
- 
+
 code {
   font-family:'Bitstream Vera Sans Mono','Courier', monospace;
-  white-space: nowrap;  
+  white-space: nowrap;
 /*  display: block;*/
   word-break: break-all;
   word-wrap: break-word;
@@ -93,4 +93,8 @@ td.linenos {
 }
 td.code {
   border: solid 1px #ddd;
+}
+
+.line-data {
+  width: 100%;
 }
