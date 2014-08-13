@@ -23389,14 +23389,14 @@ module.exports = function(vars,obj,depth) {
       })
 
       if ( name.length ) {
-        name.forEach(function(n){
+        name = name.map(function(n){
           if (n instanceof Array) {
-            n.forEach(function(nn){
-              nn = vars.format.value(nn.toString(),t)
+            return n.map(function(nn){
+              return vars.format.value(nn.toString(),t)
             })
           }
           else if (n) {
-            n = vars.format.value(n.toString(),t)
+            return vars.format.value(n.toString(),t)
           }
         })
         if (name.length === 1) name = name[0]
@@ -31362,8 +31362,9 @@ d3plus.tooltip.app = function(params) {
       , nestKey   = vars.id.nesting[depth]
       , nameList  = "merged" in d.d3plus ? d.d3plus.merged : d[nestKey]
       , dataValue = fetchValue( vars , d , vars.size.value )
+      , same = (!(nameList instanceof Array) || (nameList instanceof Array && nameList.length === 1)) && depth === vars.depth.value
 
-    if ( vars.tooltip.children.value ) {
+    if ( !same && vars.tooltip.children.value ) {
 
       if ( nameList instanceof Array ) {
 
@@ -31413,14 +31414,13 @@ d3plus.tooltip.app = function(params) {
       else if ( nameList && nameList !== "null" ) {
 
         var name  = fetchText( vars , nameList , depth )[0]
-
         children[name] = dataValue ? vars.format.value( dataValue , vars.size.value ) : ""
 
       }
 
     }
 
-    if ( vars.size.value && vars.tooltip.size.value && dataValue && ( !nameList || nameList instanceof Array ) ) {
+    if ( vars.size.value && vars.tooltip.size.value && dataValue && ( same || !nameList || nameList instanceof Array ) ) {
       ex[vars.size.value] = dataValue
     }
 
@@ -37216,8 +37216,28 @@ var chart = function(vars) {
 
         // add padding to axis if there is only 1 value
         if (vars[axis+"_range"][0] == vars[axis+"_range"][1]) {
-          vars[axis+"_range"][0] -= 1
-          vars[axis+"_range"][1] += 1
+          if (vars[axis].value === vars.time.value) {
+            var closestTime = d3plus.util.closest(vars.data.time.ticks,vars[axis+"_range"][0])
+              , timeIndex = vars.data.time.ticks.indexOf(closestTime)
+            if (timeIndex > 0) {
+              vars[axis+"_range"][0] = vars.data.time.ticks[timeIndex-1]
+            }
+            else {
+              var diff = vars.data.time.ticks[timeIndex+1] - closestTime
+              vars[axis+"_range"][0] = new Date(closestTime.getTime() - diff)
+            }
+            if (timeIndex < vars.data.time.ticks.length - 1) {
+              vars[axis+"_range"][1] = vars.data.time.ticks[timeIndex+1]
+            }
+            else {
+              var diff = closestTime - vars.data.time.ticks[timeIndex-1]
+              vars[axis+"_range"][1] = new Date(closestTime.getTime() + diff)
+            }
+          }
+          else {
+            vars[axis+"_range"][0] -= 1
+            vars[axis+"_range"][1] += 1
+          }
         }
 
         // reverse Y axis
@@ -37375,6 +37395,15 @@ var chart = function(vars) {
         vars[axis].ticks = vars.data.time.ticks.filter(function(t){
           return t <= range[1] && t >= range[0]
         })
+        if (vars[axis].ticks.indexOf(range[0]) < 0) {
+          vars[axis].ticks.unshift(range[0])
+        }
+        if (vars[axis].ticks.indexOf(range[1]) < 0) {
+          vars[axis].ticks.push(range[1])
+        }
+      }
+      else if (vars.continuous_axis === axis) {
+        vars[axis].ticks = vars.tickValues[axis]
       }
       else {
         vars[axis].ticks = vars[axis+"_scale"].ticks()
@@ -37423,30 +37452,33 @@ var chart = function(vars) {
     , yAxisWidth = d3.max(d3plus.font.sizes(yTicks,tickAttrs),function(d){return d.width}) + vars.labels.padding
   graph.margin.left += yAxisWidth
   graph.width -= yAxisWidth
-  vars.x_scale.rangeRound([0,graph.width])
 
   var xTicks = vars.x.ticks.map(function(d){
         return vars.format.value(d,vars.x.value)
       })
     , xSizes = d3plus.font.sizes(xTicks,tickAttrs)
     , xAxisWidth = d3.max(xSizes,function(d){return d.width})
+    , xAxisHeight = d3.max(xSizes,function(d){return d.height})
     , xMaxWidth = d3.min([graph.width/(xTicks.length+1),graph.margin.left*2]) - vars.labels.padding*2
 
   if (xAxisWidth < xMaxWidth) {
-    var xOffset = d3.max(xSizes,function(d){return d.height}) + vars.labels.padding
-      , xAnchor = "middle"
+    xAxisWidth += vars.labels.padding
+    var xAnchor = "middle"
       , xDy     = "0ex"
       , xTransform = "translate(0,10)"
   }
   else {
-    var xOffset = d3.max(xSizes,function(d){return d.width}) + vars.labels.padding
-      , xRotate = true
+    xAxisWidth = xAxisHeight + vars.labels.padding
+    xAxisHeight = d3.max(xSizes,function(d){return d.width})
+    var xRotate = true
       , xAnchor = "start"
       , xDy     = "0.5ex"
       , xTransform = "translate(15,10)rotate(70)"
   }
 
-  graph.height -= xOffset
+  graph.height -= xAxisHeight
+  graph.width -= xAxisWidth/2
+  vars.x_scale.rangeRound([0,graph.width])
   vars.y_scale.rangeRound([0,graph.height])
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -38228,6 +38260,7 @@ geo_map.zoom         = true
 module.exports = geo_map
 
 },{}],276:[function(require,module,exports){
+var chart = require("./chart.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Line Plot
 //------------------------------------------------------------------------------
@@ -38252,7 +38285,7 @@ line.tooltip      = "static"
 
 module.exports = line
 
-},{}],277:[function(require,module,exports){
+},{"./chart.js":274}],277:[function(require,module,exports){
 var fetchValue = require("../../core/fetch/value.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Network
@@ -39117,10 +39150,10 @@ rings.tooltip      = "static"
 module.exports = rings
 
 },{"../../core/fetch/color.js":78,"../../core/fetch/value.js":81}],280:[function(require,module,exports){
+var chart = require("./chart.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Scatterplot
 //------------------------------------------------------------------------------
-var chart = require("./chart.js")
 var scatter = function(vars) {
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -39143,11 +39176,11 @@ scatter.tooltip      = "static"
 module.exports = scatter
 
 },{"./chart.js":274}],281:[function(require,module,exports){
+var chart = require("./chart.js"),
+    dataThreshold = require("../../core/data/threshold.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Stacked Area Chart
 //------------------------------------------------------------------------------
-var chart = require("./chart.js"),
-    dataThreshold = require("../../core/data/threshold.js")
 var stacked = function(vars) {
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -40347,12 +40380,12 @@ d3plus.ui.message = function(vars,message) {
 
 d3plus.ui.timeline = function(vars) {
 
-  var years = []
-  vars.data.time.values.forEach(function(d){
-    years.push(new Date(d))
-  })
+  if ((!vars.internal_error || !vars.data.missing) && !vars.small && vars.data.time && vars.data.time.values.length > 1 && vars.timeline.value) {
 
-  if ((!vars.internal_error || !vars.data.missing) && !vars.small && years && years.length > 1 && vars.timeline.value) {
+    var years = []
+    vars.data.time.values.forEach(function(d){
+      years.push(new Date(d))
+    })
 
     if ( vars.dev.value ) d3plus.console.time("drawing timeline")
 
