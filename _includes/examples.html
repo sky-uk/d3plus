@@ -5,6 +5,7 @@
 <script>
 
   var order = "{{ include.order }}".split(".")
+    , hidden = "{{ include.hidden }}".split(".")
     , categories = {}
     , gists = []
     , users = []
@@ -34,8 +35,10 @@
     if (layout && url.length == 5 && url[1] == "examples" && url[3] != "simple") {
       var category = url[2]
         , gist = url[3].split(".")[0]
-      categories[gist] = category
-      gists.push(gist)
+      if (hidden.indexOf(gist) < 0) {
+        categories[gist] = category
+        gists.push(gist)
+      }
     }
   {% endfor %}
 
