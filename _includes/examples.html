@@ -1,5 +1,5 @@
-<script src="/js/d3.js"></script>
-<script src="/js/d3plus.js"></script>
+<script src="/js/d3.min.js"></script>
+<script src="/js/d3plus.min.js"></script>
 <script src="http://d3js.org/queue.v1.min.js"></script>
 
 <script>
@@ -102,15 +102,14 @@
           .data(toggles)
           .focus("all",function(value){
 
-            d3.selectAll("section")
-              .style("display",function(d){
+            value = value[0]
 
-                if ( value === "all" ) {
-                  return "block"
-                }
-
-                return ["toggle",value].indexOf(this.id) >= 0 ? "block" : "none"
-
+            d3.selectAll("section").transition().duration(600)
+              .style("opacity",function(d){
+                return value === "all" || ["toggle",value].indexOf(this.id) >= 0 ? 1 : 0
+              })
+              .style("height",function(d){
+                return value === "all" || ["toggle",value].indexOf(this.id) >= 0 ? heights[this.id]+"px" : "0px"
               })
 
           })
@@ -219,6 +218,12 @@
         })
 
       })
+
+      var heights = {}
+      d3.selectAll("section")
+        .each(function(d){
+          heights[this.id] = this.offsetHeight || Math.round(this.getBoundingClientRect().height)
+        })
 
     }
   })

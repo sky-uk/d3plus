@@ -103,8 +103,8 @@ p.example {
 }
 
 a.example {
-  background-color: #b35c1e;
-  border: 1px solid #b35c1e;
+  /*background-color: #b35c1e;*/
+  border: 1px solid #ddd;
   box-shadow: 0px 2px 5px #ccc;
   display: inline-block;
   height: 100px;
@@ -122,21 +122,22 @@ a.example img {
   border: 0px;
   display: block;
   height: 100px;
-  opacity: 0.9;
-  -webkit-transition: opacity .1s;
-          transition: opacity .1s;
+  /*opacity: 0.8;*/
+  /*-webkit-transition: opacity .1s;*/
+          /*transition: opacity .1s;*/
   width: 150px;
 }
 
 a.example div.title {
-  background-color: rgba(179,92,30,0.75);
+  background-color: rgba(255,255,255,0.9);
+  border-top: 1px solid rgba(0,0,0,0.1);
   bottom: 0px;
-  color: #f7f7f7;
+  color: #444;
   font-size: 12px;
   padding: 3px 5px;
   position: absolute;
-  -webkit-transition: background-color .1s;
-          transition: background-color .1s;
+  /*-webkit-transition: background-color .1s;*/
+          /*transition: background-color .1s;*/
   width: 140px;
 }
 
@@ -150,13 +151,13 @@ a.example:hover {
   box-shadow: 0px 2px 5px #999;
 }
 
-a.example:hover img {
+/*a.example:hover img {
   opacity: 1;
-}
+}*/
 
-a.example:hover div.title {
-  background-color: rgba(179,92,30,0.9);
-}
+/*a.example:hover div.title {
+  background-color: rgba(255,255,255,0.9);
+}*/
 
 a.example span.banner.New {
   color: rgba(179,92,30,1);
