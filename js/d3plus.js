@@ -1,7 +1,1388 @@
 (function e(t,n,r){function s(o,u){if(!n[o]){if(!t[o]){var a=typeof require=="function"&&require;if(!u&&a)return a(o,!0);if(i)return i(o,!0);throw new Error("Cannot find module '"+o+"'")}var f=n[o]={exports:{}};t[o][0].call(f.exports,function(e){var n=t[o][1][e];return s(n?n:e)},f,f.exports,e,t,n,r)}return n[o].exports}var i=typeof require=="function"&&require;for(var o=0;o<r.length;o++)s(r[o]);return s})({1:[function(require,module,exports){
+
+},{}],2:[function(require,module,exports){
+/*!
+ * The buffer module from node.js, for the browser.
+ *
+ * @author   Feross Aboukhadijeh <feross@feross.org> <http://feross.org>
+ * @license  MIT
+ */
+
+var base64 = require('base64-js')
+var ieee754 = require('ieee754')
+
+exports.Buffer = Buffer
+exports.SlowBuffer = Buffer
+exports.INSPECT_MAX_BYTES = 50
+Buffer.poolSize = 8192
+
+/**
+ * If `TYPED_ARRAY_SUPPORT`:
+ *   === true    Use Uint8Array implementation (fastest)
+ *   === false   Use Object implementation (most compatible, even IE6)
+ *
+ * Browsers that support typed arrays are IE 10+, Firefox 4+, Chrome 7+, Safari 5.1+,
+ * Opera 11.6+, iOS 4.2+.
+ *
+ * Note:
+ *
+ * - Implementation must support adding new properties to `Uint8Array` instances.
+ *   Firefox 4-29 lacked support, fixed in Firefox 30+.
+ *   See: https://bugzilla.mozilla.org/show_bug.cgi?id=695438.
+ *
+ *  - Chrome 9-10 is missing the `TypedArray.prototype.subarray` function.
+ *
+ *  - IE10 has a broken `TypedArray.prototype.subarray` function which returns arrays of
+ *    incorrect length in some situations.
+ *
+ * We detect these buggy browsers and set `TYPED_ARRAY_SUPPORT` to `false` so they will
+ * get the Object implementation, which is slower but will work correctly.
+ */
+var TYPED_ARRAY_SUPPORT = (function () {
+  try {
+    var buf = new ArrayBuffer(0)
+    var arr = new Uint8Array(buf)
+    arr.foo = function () { return 42 }
+    return 42 === arr.foo() && // typed array instances can be augmented
+        typeof arr.subarray === 'function' && // chrome 9-10 lack `subarray`
+        new Uint8Array(1).subarray(1, 1).byteLength === 0 // ie10 has broken `subarray`
+  } catch (e) {
+    return false
+  }
+})()
+
+/**
+ * Class: Buffer
+ * =============
+ *
+ * The Buffer constructor returns instances of `Uint8Array` that are augmented
+ * with function properties for all the node `Buffer` API functions. We use
+ * `Uint8Array` so that square bracket notation works as expected -- it returns
+ * a single octet.
+ *
+ * By augmenting the instances, we can avoid modifying the `Uint8Array`
+ * prototype.
+ */
+function Buffer (subject, encoding, noZero) {
+  if (!(this instanceof Buffer))
+    return new Buffer(subject, encoding, noZero)
+
+  var type = typeof subject
+
+  // Find the length
+  var length
+  if (type === 'number')
+    length = subject > 0 ? subject >>> 0 : 0
+  else if (type === 'string') {
+    if (encoding === 'base64')
+      subject = base64clean(subject)
+    length = Buffer.byteLength(subject, encoding)
+  } else if (type === 'object' && subject !== null) { // assume object is array-like
+    if (subject.type === 'Buffer' && isArray(subject.data))
+      subject = subject.data
+    length = +subject.length > 0 ? Math.floor(+subject.length) : 0
+  } else
+    throw new Error('First argument needs to be a number, array or string.')
+
+  var buf
+  if (TYPED_ARRAY_SUPPORT) {
+    // Preferred: Return an augmented `Uint8Array` instance for best performance
+    buf = Buffer._augment(new Uint8Array(length))
+  } else {
+    // Fallback: Return THIS instance of Buffer (created by `new`)
+    buf = this
+    buf.length = length
+    buf._isBuffer = true
+  }
+
+  var i
+  if (TYPED_ARRAY_SUPPORT && typeof subject.byteLength === 'number') {
+    // Speed optimization -- use set if we're copying from a typed array
+    buf._set(subject)
+  } else if (isArrayish(subject)) {
+    // Treat array-ish objects as a byte array
+    if (Buffer.isBuffer(subject)) {
+      for (i = 0; i < length; i++)
+        buf[i] = subject.readUInt8(i)
+    } else {
+      for (i = 0; i < length; i++)
+        buf[i] = ((subject[i] % 256) + 256) % 256
+    }
+  } else if (type === 'string') {
+    buf.write(subject, 0, encoding)
+  } else if (type === 'number' && !TYPED_ARRAY_SUPPORT && !noZero) {
+    for (i = 0; i < length; i++) {
+      buf[i] = 0
+    }
+  }
+
+  return buf
+}
+
+// STATIC METHODS
+// ==============
+
+Buffer.isEncoding = function (encoding) {
+  switch (String(encoding).toLowerCase()) {
+    case 'hex':
+    case 'utf8':
+    case 'utf-8':
+    case 'ascii':
+    case 'binary':
+    case 'base64':
+    case 'raw':
+    case 'ucs2':
+    case 'ucs-2':
+    case 'utf16le':
+    case 'utf-16le':
+      return true
+    default:
+      return false
+  }
+}
+
+Buffer.isBuffer = function (b) {
+  return !!(b != null && b._isBuffer)
+}
+
+Buffer.byteLength = function (str, encoding) {
+  var ret
+  str = str.toString()
+  switch (encoding || 'utf8') {
+    case 'hex':
+      ret = str.length / 2
+      break
+    case 'utf8':
+    case 'utf-8':
+      ret = utf8ToBytes(str).length
+      break
+    case 'ascii':
+    case 'binary':
+    case 'raw':
+      ret = str.length
+      break
+    case 'base64':
+      ret = base64ToBytes(str).length
+      break
+    case 'ucs2':
+    case 'ucs-2':
+    case 'utf16le':
+    case 'utf-16le':
+      ret = str.length * 2
+      break
+    default:
+      throw new Error('Unknown encoding')
+  }
+  return ret
+}
+
+Buffer.concat = function (list, totalLength) {
+  assert(isArray(list), 'Usage: Buffer.concat(list[, length])')
+
+  if (list.length === 0) {
+    return new Buffer(0)
+  } else if (list.length === 1) {
+    return list[0]
+  }
+
+  var i
+  if (totalLength === undefined) {
+    totalLength = 0
+    for (i = 0; i < list.length; i++) {
+      totalLength += list[i].length
+    }
+  }
+
+  var buf = new Buffer(totalLength)
+  var pos = 0
+  for (i = 0; i < list.length; i++) {
+    var item = list[i]
+    item.copy(buf, pos)
+    pos += item.length
+  }
+  return buf
+}
+
+Buffer.compare = function (a, b) {
+  assert(Buffer.isBuffer(a) && Buffer.isBuffer(b), 'Arguments must be Buffers')
+  var x = a.length
+  var y = b.length
+  for (var i = 0, len = Math.min(x, y); i < len && a[i] === b[i]; i++) {}
+  if (i !== len) {
+    x = a[i]
+    y = b[i]
+  }
+  if (x < y) {
+    return -1
+  }
+  if (y < x) {
+    return 1
+  }
+  return 0
+}
+
+// BUFFER INSTANCE METHODS
+// =======================
+
+function hexWrite (buf, string, offset, length) {
+  offset = Number(offset) || 0
+  var remaining = buf.length - offset
+  if (!length) {
+    length = remaining
+  } else {
+    length = Number(length)
+    if (length > remaining) {
+      length = remaining
+    }
+  }
+
+  // must be an even number of digits
+  var strLen = string.length
+  assert(strLen % 2 === 0, 'Invalid hex string')
+
+  if (length > strLen / 2) {
+    length = strLen / 2
+  }
+  for (var i = 0; i < length; i++) {
+    var byte = parseInt(string.substr(i * 2, 2), 16)
+    assert(!isNaN(byte), 'Invalid hex string')
+    buf[offset + i] = byte
+  }
+  return i
+}
+
+function utf8Write (buf, string, offset, length) {
+  var charsWritten = blitBuffer(utf8ToBytes(string), buf, offset, length)
+  return charsWritten
+}
+
+function asciiWrite (buf, string, offset, length) {
+  var charsWritten = blitBuffer(asciiToBytes(string), buf, offset, length)
+  return charsWritten
+}
+
+function binaryWrite (buf, string, offset, length) {
+  return asciiWrite(buf, string, offset, length)
+}
+
+function base64Write (buf, string, offset, length) {
+  var charsWritten = blitBuffer(base64ToBytes(string), buf, offset, length)
+  return charsWritten
+}
+
+function utf16leWrite (buf, string, offset, length) {
+  var charsWritten = blitBuffer(utf16leToBytes(string), buf, offset, length)
+  return charsWritten
+}
+
+Buffer.prototype.write = function (string, offset, length, encoding) {
+  // Support both (string, offset, length, encoding)
+  // and the legacy (string, encoding, offset, length)
+  if (isFinite(offset)) {
+    if (!isFinite(length)) {
+      encoding = length
+      length = undefined
+    }
+  } else {  // legacy
+    var swap = encoding
+    encoding = offset
+    offset = length
+    length = swap
+  }
+
+  offset = Number(offset) || 0
+  var remaining = this.length - offset
+  if (!length) {
+    length = remaining
+  } else {
+    length = Number(length)
+    if (length > remaining) {
+      length = remaining
+    }
+  }
+  encoding = String(encoding || 'utf8').toLowerCase()
+
+  var ret
+  switch (encoding) {
+    case 'hex':
+      ret = hexWrite(this, string, offset, length)
+      break
+    case 'utf8':
+    case 'utf-8':
+      ret = utf8Write(this, string, offset, length)
+      break
+    case 'ascii':
+      ret = asciiWrite(this, string, offset, length)
+      break
+    case 'binary':
+      ret = binaryWrite(this, string, offset, length)
+      break
+    case 'base64':
+      ret = base64Write(this, string, offset, length)
+      break
+    case 'ucs2':
+    case 'ucs-2':
+    case 'utf16le':
+    case 'utf-16le':
+      ret = utf16leWrite(this, string, offset, length)
+      break
+    default:
+      throw new Error('Unknown encoding')
+  }
+  return ret
+}
+
+Buffer.prototype.toString = function (encoding, start, end) {
+  var self = this
+
+  encoding = String(encoding || 'utf8').toLowerCase()
+  start = Number(start) || 0
+  end = (end === undefined) ? self.length : Number(end)
+
+  // Fastpath empty strings
+  if (end === start)
+    return ''
+
+  var ret
+  switch (encoding) {
+    case 'hex':
+      ret = hexSlice(self, start, end)
+      break
+    case 'utf8':
+    case 'utf-8':
+      ret = utf8Slice(self, start, end)
+      break
+    case 'ascii':
+      ret = asciiSlice(self, start, end)
+      break
+    case 'binary':
+      ret = binarySlice(self, start, end)
+      break
+    case 'base64':
+      ret = base64Slice(self, start, end)
+      break
+    case 'ucs2':
+    case 'ucs-2':
+    case 'utf16le':
+    case 'utf-16le':
+      ret = utf16leSlice(self, start, end)
+      break
+    default:
+      throw new Error('Unknown encoding')
+  }
+  return ret
+}
+
+Buffer.prototype.toJSON = function () {
+  return {
+    type: 'Buffer',
+    data: Array.prototype.slice.call(this._arr || this, 0)
+  }
+}
+
+Buffer.prototype.equals = function (b) {
+  assert(Buffer.isBuffer(b), 'Argument must be a Buffer')
+  return Buffer.compare(this, b) === 0
+}
+
+Buffer.prototype.compare = function (b) {
+  assert(Buffer.isBuffer(b), 'Argument must be a Buffer')
+  return Buffer.compare(this, b)
+}
+
+// copy(targetBuffer, targetStart=0, sourceStart=0, sourceEnd=buffer.length)
+Buffer.prototype.copy = function (target, target_start, start, end) {
+  var source = this
+
+  if (!start) start = 0
+  if (!end && end !== 0) end = this.length
+  if (!target_start) target_start = 0
+
+  // Copy 0 bytes; we're done
+  if (end === start) return
+  if (target.length === 0 || source.length === 0) return
+
+  // Fatal error conditions
+  assert(end >= start, 'sourceEnd < sourceStart')
+  assert(target_start >= 0 && target_start < target.length,
+      'targetStart out of bounds')
+  assert(start >= 0 && start < source.length, 'sourceStart out of bounds')
+  assert(end >= 0 && end <= source.length, 'sourceEnd out of bounds')
+
+  // Are we oob?
+  if (end > this.length)
+    end = this.length
+  if (target.length - target_start < end - start)
+    end = target.length - target_start + start
+
+  var len = end - start
+
+  if (len < 100 || !TYPED_ARRAY_SUPPORT) {
+    for (var i = 0; i < len; i++) {
+      target[i + target_start] = this[i + start]
+    }
+  } else {
+    target._set(this.subarray(start, start + len), target_start)
+  }
+}
+
+function base64Slice (buf, start, end) {
+  if (start === 0 && end === buf.length) {
+    return base64.fromByteArray(buf)
+  } else {
+    return base64.fromByteArray(buf.slice(start, end))
+  }
+}
+
+function utf8Slice (buf, start, end) {
+  var res = ''
+  var tmp = ''
+  end = Math.min(buf.length, end)
+
+  for (var i = start; i < end; i++) {
+    if (buf[i] <= 0x7F) {
+      res += decodeUtf8Char(tmp) + String.fromCharCode(buf[i])
+      tmp = ''
+    } else {
+      tmp += '%' + buf[i].toString(16)
+    }
+  }
+
+  return res + decodeUtf8Char(tmp)
+}
+
+function asciiSlice (buf, start, end) {
+  var ret = ''
+  end = Math.min(buf.length, end)
+
+  for (var i = start; i < end; i++) {
+    ret += String.fromCharCode(buf[i])
+  }
+  return ret
+}
+
+function binarySlice (buf, start, end) {
+  return asciiSlice(buf, start, end)
+}
+
+function hexSlice (buf, start, end) {
+  var len = buf.length
+
+  if (!start || start < 0) start = 0
+  if (!end || end < 0 || end > len) end = len
+
+  var out = ''
+  for (var i = start; i < end; i++) {
+    out += toHex(buf[i])
+  }
+  return out
+}
+
+function utf16leSlice (buf, start, end) {
+  var bytes = buf.slice(start, end)
+  var res = ''
+  for (var i = 0; i < bytes.length; i += 2) {
+    res += String.fromCharCode(bytes[i] + bytes[i + 1] * 256)
+  }
+  return res
+}
+
+Buffer.prototype.slice = function (start, end) {
+  var len = this.length
+  start = ~~start
+  end = end === undefined ? len : ~~end
+
+  if (start < 0) {
+    start += len;
+    if (start < 0)
+      start = 0
+  } else if (start > len) {
+    start = len
+  }
+
+  if (end < 0) {
+    end += len
+    if (end < 0)
+      end = 0
+  } else if (end > len) {
+    end = len
+  }
+
+  if (end < start)
+    end = start
+
+  if (TYPED_ARRAY_SUPPORT) {
+    return Buffer._augment(this.subarray(start, end))
+  } else {
+    var sliceLen = end - start
+    var newBuf = new Buffer(sliceLen, undefined, true)
+    for (var i = 0; i < sliceLen; i++) {
+      newBuf[i] = this[i + start]
+    }
+    return newBuf
+  }
+}
+
+// `get` will be removed in Node 0.13+
+Buffer.prototype.get = function (offset) {
+  console.log('.get() is deprecated. Access using array indexes instead.')
+  return this.readUInt8(offset)
+}
+
+// `set` will be removed in Node 0.13+
+Buffer.prototype.set = function (v, offset) {
+  console.log('.set() is deprecated. Access using array indexes instead.')
+  return this.writeUInt8(v, offset)
+}
+
+Buffer.prototype.readUInt8 = function (offset, noAssert) {
+  if (!noAssert) {
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset < this.length, 'Trying to read beyond buffer length')
+  }
+
+  if (offset >= this.length)
+    return
+
+  return this[offset]
+}
+
+function readUInt16 (buf, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset + 1 < buf.length, 'Trying to read beyond buffer length')
+  }
+
+  var len = buf.length
+  if (offset >= len)
+    return
+
+  var val
+  if (littleEndian) {
+    val = buf[offset]
+    if (offset + 1 < len)
+      val |= buf[offset + 1] << 8
+  } else {
+    val = buf[offset] << 8
+    if (offset + 1 < len)
+      val |= buf[offset + 1]
+  }
+  return val
+}
+
+Buffer.prototype.readUInt16LE = function (offset, noAssert) {
+  return readUInt16(this, offset, true, noAssert)
+}
+
+Buffer.prototype.readUInt16BE = function (offset, noAssert) {
+  return readUInt16(this, offset, false, noAssert)
+}
+
+function readUInt32 (buf, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset + 3 < buf.length, 'Trying to read beyond buffer length')
+  }
+
+  var len = buf.length
+  if (offset >= len)
+    return
+
+  var val
+  if (littleEndian) {
+    if (offset + 2 < len)
+      val = buf[offset + 2] << 16
+    if (offset + 1 < len)
+      val |= buf[offset + 1] << 8
+    val |= buf[offset]
+    if (offset + 3 < len)
+      val = val + (buf[offset + 3] << 24 >>> 0)
+  } else {
+    if (offset + 1 < len)
+      val = buf[offset + 1] << 16
+    if (offset + 2 < len)
+      val |= buf[offset + 2] << 8
+    if (offset + 3 < len)
+      val |= buf[offset + 3]
+    val = val + (buf[offset] << 24 >>> 0)
+  }
+  return val
+}
+
+Buffer.prototype.readUInt32LE = function (offset, noAssert) {
+  return readUInt32(this, offset, true, noAssert)
+}
+
+Buffer.prototype.readUInt32BE = function (offset, noAssert) {
+  return readUInt32(this, offset, false, noAssert)
+}
+
+Buffer.prototype.readInt8 = function (offset, noAssert) {
+  if (!noAssert) {
+    assert(offset !== undefined && offset !== null,
+        'missing offset')
+    assert(offset < this.length, 'Trying to read beyond buffer length')
+  }
+
+  if (offset >= this.length)
+    return
+
+  var neg = this[offset] & 0x80
+  if (neg)
+    return (0xff - this[offset] + 1) * -1
+  else
+    return this[offset]
+}
+
+function readInt16 (buf, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset + 1 < buf.length, 'Trying to read beyond buffer length')
+  }
+
+  var len = buf.length
+  if (offset >= len)
+    return
+
+  var val = readUInt16(buf, offset, littleEndian, true)
+  var neg = val & 0x8000
+  if (neg)
+    return (0xffff - val + 1) * -1
+  else
+    return val
+}
+
+Buffer.prototype.readInt16LE = function (offset, noAssert) {
+  return readInt16(this, offset, true, noAssert)
+}
+
+Buffer.prototype.readInt16BE = function (offset, noAssert) {
+  return readInt16(this, offset, false, noAssert)
+}
+
+function readInt32 (buf, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset + 3 < buf.length, 'Trying to read beyond buffer length')
+  }
+
+  var len = buf.length
+  if (offset >= len)
+    return
+
+  var val = readUInt32(buf, offset, littleEndian, true)
+  var neg = val & 0x80000000
+  if (neg)
+    return (0xffffffff - val + 1) * -1
+  else
+    return val
+}
+
+Buffer.prototype.readInt32LE = function (offset, noAssert) {
+  return readInt32(this, offset, true, noAssert)
+}
+
+Buffer.prototype.readInt32BE = function (offset, noAssert) {
+  return readInt32(this, offset, false, noAssert)
+}
+
+function readFloat (buf, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
+    assert(offset + 3 < buf.length, 'Trying to read beyond buffer length')
+  }
+
+  return ieee754.read(buf, offset, littleEndian, 23, 4)
+}
+
+Buffer.prototype.readFloatLE = function (offset, noAssert) {
+  return readFloat(this, offset, true, noAssert)
+}
+
+Buffer.prototype.readFloatBE = function (offset, noAssert) {
+  return readFloat(this, offset, false, noAssert)
+}
+
+function readDouble (buf, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
+    assert(offset + 7 < buf.length, 'Trying to read beyond buffer length')
+  }
+
+  return ieee754.read(buf, offset, littleEndian, 52, 8)
+}
+
+Buffer.prototype.readDoubleLE = function (offset, noAssert) {
+  return readDouble(this, offset, true, noAssert)
+}
+
+Buffer.prototype.readDoubleBE = function (offset, noAssert) {
+  return readDouble(this, offset, false, noAssert)
+}
+
+Buffer.prototype.writeUInt8 = function (value, offset, noAssert) {
+  if (!noAssert) {
+    assert(value !== undefined && value !== null, 'missing value')
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset < this.length, 'trying to write beyond buffer length')
+    verifuint(value, 0xff)
+  }
+
+  if (offset >= this.length) return
+
+  this[offset] = value
+  return offset + 1
+}
+
+function writeUInt16 (buf, value, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    assert(value !== undefined && value !== null, 'missing value')
+    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset + 1 < buf.length, 'trying to write beyond buffer length')
+    verifuint(value, 0xffff)
+  }
+
+  var len = buf.length
+  if (offset >= len)
+    return
+
+  for (var i = 0, j = Math.min(len - offset, 2); i < j; i++) {
+    buf[offset + i] =
+        (value & (0xff << (8 * (littleEndian ? i : 1 - i)))) >>>
+            (littleEndian ? i : 1 - i) * 8
+  }
+  return offset + 2
+}
+
+Buffer.prototype.writeUInt16LE = function (value, offset, noAssert) {
+  return writeUInt16(this, value, offset, true, noAssert)
+}
+
+Buffer.prototype.writeUInt16BE = function (value, offset, noAssert) {
+  return writeUInt16(this, value, offset, false, noAssert)
+}
+
+function writeUInt32 (buf, value, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    assert(value !== undefined && value !== null, 'missing value')
+    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset + 3 < buf.length, 'trying to write beyond buffer length')
+    verifuint(value, 0xffffffff)
+  }
+
+  var len = buf.length
+  if (offset >= len)
+    return
+
+  for (var i = 0, j = Math.min(len - offset, 4); i < j; i++) {
+    buf[offset + i] =
+        (value >>> (littleEndian ? i : 3 - i) * 8) & 0xff
+  }
+  return offset + 4
+}
+
+Buffer.prototype.writeUInt32LE = function (value, offset, noAssert) {
+  return writeUInt32(this, value, offset, true, noAssert)
+}
+
+Buffer.prototype.writeUInt32BE = function (value, offset, noAssert) {
+  return writeUInt32(this, value, offset, false, noAssert)
+}
+
+Buffer.prototype.writeInt8 = function (value, offset, noAssert) {
+  if (!noAssert) {
+    assert(value !== undefined && value !== null, 'missing value')
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset < this.length, 'Trying to write beyond buffer length')
+    verifsint(value, 0x7f, -0x80)
+  }
+
+  if (offset >= this.length)
+    return
+
+  if (value >= 0)
+    this.writeUInt8(value, offset, noAssert)
+  else
+    this.writeUInt8(0xff + value + 1, offset, noAssert)
+  return offset + 1
+}
+
+function writeInt16 (buf, value, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    assert(value !== undefined && value !== null, 'missing value')
+    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset + 1 < buf.length, 'Trying to write beyond buffer length')
+    verifsint(value, 0x7fff, -0x8000)
+  }
+
+  var len = buf.length
+  if (offset >= len)
+    return
+
+  if (value >= 0)
+    writeUInt16(buf, value, offset, littleEndian, noAssert)
+  else
+    writeUInt16(buf, 0xffff + value + 1, offset, littleEndian, noAssert)
+  return offset + 2
+}
+
+Buffer.prototype.writeInt16LE = function (value, offset, noAssert) {
+  return writeInt16(this, value, offset, true, noAssert)
+}
+
+Buffer.prototype.writeInt16BE = function (value, offset, noAssert) {
+  return writeInt16(this, value, offset, false, noAssert)
+}
+
+function writeInt32 (buf, value, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    assert(value !== undefined && value !== null, 'missing value')
+    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset + 3 < buf.length, 'Trying to write beyond buffer length')
+    verifsint(value, 0x7fffffff, -0x80000000)
+  }
+
+  var len = buf.length
+  if (offset >= len)
+    return
+
+  if (value >= 0)
+    writeUInt32(buf, value, offset, littleEndian, noAssert)
+  else
+    writeUInt32(buf, 0xffffffff + value + 1, offset, littleEndian, noAssert)
+  return offset + 4
+}
+
+Buffer.prototype.writeInt32LE = function (value, offset, noAssert) {
+  return writeInt32(this, value, offset, true, noAssert)
+}
+
+Buffer.prototype.writeInt32BE = function (value, offset, noAssert) {
+  return writeInt32(this, value, offset, false, noAssert)
+}
+
+function writeFloat (buf, value, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    assert(value !== undefined && value !== null, 'missing value')
+    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset + 3 < buf.length, 'Trying to write beyond buffer length')
+    verifIEEE754(value, 3.4028234663852886e+38, -3.4028234663852886e+38)
+  }
+
+  var len = buf.length
+  if (offset >= len)
+    return
+
+  ieee754.write(buf, value, offset, littleEndian, 23, 4)
+  return offset + 4
+}
+
+Buffer.prototype.writeFloatLE = function (value, offset, noAssert) {
+  return writeFloat(this, value, offset, true, noAssert)
+}
+
+Buffer.prototype.writeFloatBE = function (value, offset, noAssert) {
+  return writeFloat(this, value, offset, false, noAssert)
+}
+
+function writeDouble (buf, value, offset, littleEndian, noAssert) {
+  if (!noAssert) {
+    assert(value !== undefined && value !== null, 'missing value')
+    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
+    assert(offset !== undefined && offset !== null, 'missing offset')
+    assert(offset + 7 < buf.length,
+        'Trying to write beyond buffer length')
+    verifIEEE754(value, 1.7976931348623157E+308, -1.7976931348623157E+308)
+  }
+
+  var len = buf.length
+  if (offset >= len)
+    return
+
+  ieee754.write(buf, value, offset, littleEndian, 52, 8)
+  return offset + 8
+}
+
+Buffer.prototype.writeDoubleLE = function (value, offset, noAssert) {
+  return writeDouble(this, value, offset, true, noAssert)
+}
+
+Buffer.prototype.writeDoubleBE = function (value, offset, noAssert) {
+  return writeDouble(this, value, offset, false, noAssert)
+}
+
+// fill(value, start=0, end=buffer.length)
+Buffer.prototype.fill = function (value, start, end) {
+  if (!value) value = 0
+  if (!start) start = 0
+  if (!end) end = this.length
+
+  assert(end >= start, 'end < start')
+
+  // Fill 0 bytes; we're done
+  if (end === start) return
+  if (this.length === 0) return
+
+  assert(start >= 0 && start < this.length, 'start out of bounds')
+  assert(end >= 0 && end <= this.length, 'end out of bounds')
+
+  var i
+  if (typeof value === 'number') {
+    for (i = start; i < end; i++) {
+      this[i] = value
+    }
+  } else {
+    var bytes = utf8ToBytes(value.toString())
+    var len = bytes.length
+    for (i = start; i < end; i++) {
+      this[i] = bytes[i % len]
+    }
+  }
+
+  return this
+}
+
+Buffer.prototype.inspect = function () {
+  var out = []
+  var len = this.length
+  for (var i = 0; i < len; i++) {
+    out[i] = toHex(this[i])
+    if (i === exports.INSPECT_MAX_BYTES) {
+      out[i + 1] = '...'
+      break
+    }
+  }
+  return '<Buffer ' + out.join(' ') + '>'
+}
+
+/**
+ * Creates a new `ArrayBuffer` with the *copied* memory of the buffer instance.
+ * Added in Node 0.12. Only available in browsers that support ArrayBuffer.
+ */
+Buffer.prototype.toArrayBuffer = function () {
+  if (typeof Uint8Array !== 'undefined') {
+    if (TYPED_ARRAY_SUPPORT) {
+      return (new Buffer(this)).buffer
+    } else {
+      var buf = new Uint8Array(this.length)
+      for (var i = 0, len = buf.length; i < len; i += 1) {
+        buf[i] = this[i]
+      }
+      return buf.buffer
+    }
+  } else {
+    throw new Error('Buffer.toArrayBuffer not supported in this browser')
+  }
+}
+
+// HELPER FUNCTIONS
+// ================
+
+var BP = Buffer.prototype
+
+/**
+ * Augment a Uint8Array *instance* (not the Uint8Array class!) with Buffer methods
+ */
+Buffer._augment = function (arr) {
+  arr._isBuffer = true
+
+  // save reference to original Uint8Array get/set methods before overwriting
+  arr._get = arr.get
+  arr._set = arr.set
+
+  // deprecated, will be removed in node 0.13+
+  arr.get = BP.get
+  arr.set = BP.set
+
+  arr.write = BP.write
+  arr.toString = BP.toString
+  arr.toLocaleString = BP.toString
+  arr.toJSON = BP.toJSON
+  arr.equals = BP.equals
+  arr.compare = BP.compare
+  arr.copy = BP.copy
+  arr.slice = BP.slice
+  arr.readUInt8 = BP.readUInt8
+  arr.readUInt16LE = BP.readUInt16LE
+  arr.readUInt16BE = BP.readUInt16BE
+  arr.readUInt32LE = BP.readUInt32LE
+  arr.readUInt32BE = BP.readUInt32BE
+  arr.readInt8 = BP.readInt8
+  arr.readInt16LE = BP.readInt16LE
+  arr.readInt16BE = BP.readInt16BE
+  arr.readInt32LE = BP.readInt32LE
+  arr.readInt32BE = BP.readInt32BE
+  arr.readFloatLE = BP.readFloatLE
+  arr.readFloatBE = BP.readFloatBE
+  arr.readDoubleLE = BP.readDoubleLE
+  arr.readDoubleBE = BP.readDoubleBE
+  arr.writeUInt8 = BP.writeUInt8
+  arr.writeUInt16LE = BP.writeUInt16LE
+  arr.writeUInt16BE = BP.writeUInt16BE
+  arr.writeUInt32LE = BP.writeUInt32LE
+  arr.writeUInt32BE = BP.writeUInt32BE
+  arr.writeInt8 = BP.writeInt8
+  arr.writeInt16LE = BP.writeInt16LE
+  arr.writeInt16BE = BP.writeInt16BE
+  arr.writeInt32LE = BP.writeInt32LE
+  arr.writeInt32BE = BP.writeInt32BE
+  arr.writeFloatLE = BP.writeFloatLE
+  arr.writeFloatBE = BP.writeFloatBE
+  arr.writeDoubleLE = BP.writeDoubleLE
+  arr.writeDoubleBE = BP.writeDoubleBE
+  arr.fill = BP.fill
+  arr.inspect = BP.inspect
+  arr.toArrayBuffer = BP.toArrayBuffer
+
+  return arr
+}
+
+var INVALID_BASE64_RE = /[^+\/0-9A-z]/g
+
+function base64clean (str) {
+  // Node strips out invalid characters like \n and \t from the string, base64-js does not
+  str = stringtrim(str).replace(INVALID_BASE64_RE, '')
+  // Node allows for non-padded base64 strings (missing trailing ===), base64-js does not
+  while (str.length % 4 !== 0) {
+    str = str + '='
+  }
+  return str
+}
+
+function stringtrim (str) {
+  if (str.trim) return str.trim()
+  return str.replace(/^\s+|\s+$/g, '')
+}
+
+function isArray (subject) {
+  return (Array.isArray || function (subject) {
+    return Object.prototype.toString.call(subject) === '[object Array]'
+  })(subject)
+}
+
+function isArrayish (subject) {
+  return isArray(subject) || Buffer.isBuffer(subject) ||
+      subject && typeof subject === 'object' &&
+      typeof subject.length === 'number'
+}
+
+function toHex (n) {
+  if (n < 16) return '0' + n.toString(16)
+  return n.toString(16)
+}
+
+function utf8ToBytes (str) {
+  var byteArray = []
+  for (var i = 0; i < str.length; i++) {
+    var b = str.charCodeAt(i)
+    if (b <= 0x7F) {
+      byteArray.push(b)
+    } else {
+      var start = i
+      if (b >= 0xD800 && b <= 0xDFFF) i++
+      var h = encodeURIComponent(str.slice(start, i+1)).substr(1).split('%')
+      for (var j = 0; j < h.length; j++) {
+        byteArray.push(parseInt(h[j], 16))
+      }
+    }
+  }
+  return byteArray
+}
+
+function asciiToBytes (str) {
+  var byteArray = []
+  for (var i = 0; i < str.length; i++) {
+    // Node's code seems to be doing this and not & 0x7F..
+    byteArray.push(str.charCodeAt(i) & 0xFF)
+  }
+  return byteArray
+}
+
+function utf16leToBytes (str) {
+  var c, hi, lo
+  var byteArray = []
+  for (var i = 0; i < str.length; i++) {
+    c = str.charCodeAt(i)
+    hi = c >> 8
+    lo = c % 256
+    byteArray.push(lo)
+    byteArray.push(hi)
+  }
+
+  return byteArray
+}
+
+function base64ToBytes (str) {
+  return base64.toByteArray(str)
+}
+
+function blitBuffer (src, dst, offset, length) {
+  for (var i = 0; i < length; i++) {
+    if ((i + offset >= dst.length) || (i >= src.length))
+      break
+    dst[i + offset] = src[i]
+  }
+  return i
+}
+
+function decodeUtf8Char (str) {
+  try {
+    return decodeURIComponent(str)
+  } catch (err) {
+    return String.fromCharCode(0xFFFD) // UTF 8 invalid char
+  }
+}
+
+/*
+ * We have to make sure that the value is a valid integer. This means that it
+ * is non-negative. It has no fractional component and that it does not
+ * exceed the maximum allowed value.
+ */
+function verifuint (value, max) {
+  assert(typeof value === 'number', 'cannot write a non-number as a number')
+  assert(value >= 0, 'specified a negative value for writing an unsigned value')
+  assert(value <= max, 'value is larger than maximum value for type')
+  assert(Math.floor(value) === value, 'value has a fractional component')
+}
+
+function verifsint (value, max, min) {
+  assert(typeof value === 'number', 'cannot write a non-number as a number')
+  assert(value <= max, 'value larger than maximum allowed value')
+  assert(value >= min, 'value smaller than minimum allowed value')
+  assert(Math.floor(value) === value, 'value has a fractional component')
+}
+
+function verifIEEE754 (value, max, min) {
+  assert(typeof value === 'number', 'cannot write a non-number as a number')
+  assert(value <= max, 'value larger than maximum allowed value')
+  assert(value >= min, 'value smaller than minimum allowed value')
+}
+
+function assert (test, message) {
+  if (!test) throw new Error(message || 'Failed assertion')
+}
+
+},{"base64-js":3,"ieee754":4}],3:[function(require,module,exports){
+var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+
+;(function (exports) {
+	'use strict';
+
+  var Arr = (typeof Uint8Array !== 'undefined')
+    ? Uint8Array
+    : Array
+
+	var PLUS   = '+'.charCodeAt(0)
+	var SLASH  = '/'.charCodeAt(0)
+	var NUMBER = '0'.charCodeAt(0)
+	var LOWER  = 'a'.charCodeAt(0)
+	var UPPER  = 'A'.charCodeAt(0)
+
+	function decode (elt) {
+		var code = elt.charCodeAt(0)
+		if (code === PLUS)
+			return 62 // '+'
+		if (code === SLASH)
+			return 63 // '/'
+		if (code < NUMBER)
+			return -1 //no match
+		if (code < NUMBER + 10)
+			return code - NUMBER + 26 + 26
+		if (code < UPPER + 26)
+			return code - UPPER
+		if (code < LOWER + 26)
+			return code - LOWER + 26
+	}
+
+	function b64ToByteArray (b64) {
+		var i, j, l, tmp, placeHolders, arr
+
+		if (b64.length % 4 > 0) {
+			throw new Error('Invalid string. Length must be a multiple of 4')
+		}
+
+		// the number of equal signs (place holders)
+		// if there are two placeholders, than the two characters before it
+		// represent one byte
+		// if there is only one, then the three characters before it represent 2 bytes
+		// this is just a cheap hack to not do indexOf twice
+		var len = b64.length
+		placeHolders = '=' === b64.charAt(len - 2) ? 2 : '=' === b64.charAt(len - 1) ? 1 : 0
+
+		// base64 is 4/3 + up to two characters of the original data
+		arr = new Arr(b64.length * 3 / 4 - placeHolders)
+
+		// if there are placeholders, only get up to the last complete 4 chars
+		l = placeHolders > 0 ? b64.length - 4 : b64.length
+
+		var L = 0
+
+		function push (v) {
+			arr[L++] = v
+		}
+
+		for (i = 0, j = 0; i < l; i += 4, j += 3) {
+			tmp = (decode(b64.charAt(i)) << 18) | (decode(b64.charAt(i + 1)) << 12) | (decode(b64.charAt(i + 2)) << 6) | decode(b64.charAt(i + 3))
+			push((tmp & 0xFF0000) >> 16)
+			push((tmp & 0xFF00) >> 8)
+			push(tmp & 0xFF)
+		}
+
+		if (placeHolders === 2) {
+			tmp = (decode(b64.charAt(i)) << 2) | (decode(b64.charAt(i + 1)) >> 4)
+			push(tmp & 0xFF)
+		} else if (placeHolders === 1) {
+			tmp = (decode(b64.charAt(i)) << 10) | (decode(b64.charAt(i + 1)) << 4) | (decode(b64.charAt(i + 2)) >> 2)
+			push((tmp >> 8) & 0xFF)
+			push(tmp & 0xFF)
+		}
+
+		return arr
+	}
+
+	function uint8ToBase64 (uint8) {
+		var i,
+			extraBytes = uint8.length % 3, // if we have 1 byte left, pad 2 bytes
+			output = "",
+			temp, length
+
+		function encode (num) {
+			return lookup.charAt(num)
+		}
+
+		function tripletToBase64 (num) {
+			return encode(num >> 18 & 0x3F) + encode(num >> 12 & 0x3F) + encode(num >> 6 & 0x3F) + encode(num & 0x3F)
+		}
+
+		// go through the array every three bytes, we'll deal with trailing stuff later
+		for (i = 0, length = uint8.length - extraBytes; i < length; i += 3) {
+			temp = (uint8[i] << 16) + (uint8[i + 1] << 8) + (uint8[i + 2])
+			output += tripletToBase64(temp)
+		}
+
+		// pad the end with zeros, but make sure to not forget the extra bytes
+		switch (extraBytes) {
+			case 1:
+				temp = uint8[uint8.length - 1]
+				output += encode(temp >> 2)
+				output += encode((temp << 4) & 0x3F)
+				output += '=='
+				break
+			case 2:
+				temp = (uint8[uint8.length - 2] << 8) + (uint8[uint8.length - 1])
+				output += encode(temp >> 10)
+				output += encode((temp >> 4) & 0x3F)
+				output += encode((temp << 2) & 0x3F)
+				output += '='
+				break
+		}
+
+		return output
+	}
+
+	exports.toByteArray = b64ToByteArray
+	exports.fromByteArray = uint8ToBase64
+}(typeof exports === 'undefined' ? (this.base64js = {}) : exports))
+
+},{}],4:[function(require,module,exports){
+exports.read = function(buffer, offset, isLE, mLen, nBytes) {
+  var e, m,
+      eLen = nBytes * 8 - mLen - 1,
+      eMax = (1 << eLen) - 1,
+      eBias = eMax >> 1,
+      nBits = -7,
+      i = isLE ? (nBytes - 1) : 0,
+      d = isLE ? -1 : 1,
+      s = buffer[offset + i];
+
+  i += d;
+
+  e = s & ((1 << (-nBits)) - 1);
+  s >>= (-nBits);
+  nBits += eLen;
+  for (; nBits > 0; e = e * 256 + buffer[offset + i], i += d, nBits -= 8);
+
+  m = e & ((1 << (-nBits)) - 1);
+  e >>= (-nBits);
+  nBits += mLen;
+  for (; nBits > 0; m = m * 256 + buffer[offset + i], i += d, nBits -= 8);
+
+  if (e === 0) {
+    e = 1 - eBias;
+  } else if (e === eMax) {
+    return m ? NaN : ((s ? -1 : 1) * Infinity);
+  } else {
+    m = m + Math.pow(2, mLen);
+    e = e - eBias;
+  }
+  return (s ? -1 : 1) * m * Math.pow(2, e - mLen);
+};
+
+exports.write = function(buffer, value, offset, isLE, mLen, nBytes) {
+  var e, m, c,
+      eLen = nBytes * 8 - mLen - 1,
+      eMax = (1 << eLen) - 1,
+      eBias = eMax >> 1,
+      rt = (mLen === 23 ? Math.pow(2, -24) - Math.pow(2, -77) : 0),
+      i = isLE ? 0 : (nBytes - 1),
+      d = isLE ? 1 : -1,
+      s = value < 0 || (value === 0 && 1 / value < 0) ? 1 : 0;
+
+  value = Math.abs(value);
+
+  if (isNaN(value) || value === Infinity) {
+    m = isNaN(value) ? 1 : 0;
+    e = eMax;
+  } else {
+    e = Math.floor(Math.log(value) / Math.LN2);
+    if (value * (c = Math.pow(2, -e)) < 1) {
+      e--;
+      c *= 2;
+    }
+    if (e + eBias >= 1) {
+      value += rt / c;
+    } else {
+      value += rt * Math.pow(2, 1 - eBias);
+    }
+    if (value * c >= 2) {
+      e++;
+      c /= 2;
+    }
+
+    if (e + eBias >= eMax) {
+      m = 0;
+      e = eMax;
+    } else if (e + eBias >= 1) {
+      m = (value * c - 1) * Math.pow(2, mLen);
+      e = e + eBias;
+    } else {
+      m = value * Math.pow(2, eBias - 1) * Math.pow(2, mLen);
+      e = 0;
+    }
+  }
+
+  for (; mLen >= 8; buffer[offset + i] = m & 0xff, i += d, m /= 256, mLen -= 8);
+
+  e = (e << mLen) | m;
+  eLen += mLen;
+  for (; eLen > 0; buffer[offset + i] = e & 0xff, i += d, e /= 256, eLen -= 8);
+
+  buffer[offset + i - d] |= s * 128;
+};
+
+},{}],5:[function(require,module,exports){
 module.exports = require('./lib/heap');
 
-},{"./lib/heap":2}],2:[function(require,module,exports){
+},{"./lib/heap":6}],6:[function(require,module,exports){
 // Generated by CoffeeScript 1.6.3
 (function() {
   var Heap, defaultCmp, floor, heapify, heappop, heappush, heappushpop, heapreplace, insort, min, nlargest, nsmallest, updateItem, _siftdown, _siftup;
@@ -370,7 +1751,7 @@ module.exports = require('./lib/heap');
 
 }).call(this);
 
-},{}],3:[function(require,module,exports){
+},{}],7:[function(require,module,exports){
 (function (global){
 "use strict";
 
@@ -4798,7 +6179,7 @@ numeric.svd= function svd(A) {
 
 
 }).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {})
-},{}],4:[function(require,module,exports){
+},{}],8:[function(require,module,exports){
 /*
  (c) 2013, Vladimir Agafonkin
  Simplify.js, a high-performance JS polyline simplification library
@@ -4931,7 +6312,7 @@ else window.simplify = simplify;
 
 })();
 
-},{}],5:[function(require,module,exports){
+},{}],9:[function(require,module,exports){
 "use strict"
 
 module.exports = createKDTree
@@ -5544,7 +6925,7 @@ function deserializeKDTree(data) {
     return new KDTree(null, null, 0, data.d)
   }
 }
-},{"./lib/heap.js":6,"bit-twiddle":7,"inorder-tree-layout":8,"ndarray":23,"ndarray-ops":10,"ndarray-pack":15,"ndarray-scratch":21,"ndarray-select":22,"typedarray-pool":26}],6:[function(require,module,exports){
+},{"./lib/heap.js":10,"bit-twiddle":11,"inorder-tree-layout":12,"ndarray":27,"ndarray-ops":14,"ndarray-pack":19,"ndarray-scratch":25,"ndarray-select":26,"typedarray-pool":30}],10:[function(require,module,exports){
 "use strict"
 
 module.exports = KDTHeap
@@ -5653,7 +7034,7 @@ proto.dispose = function() {
   pool.freeInt32(this.index)
   pool.freeFloat64(this.data)
 }
-},{"typedarray-pool":26}],7:[function(require,module,exports){
+},{"typedarray-pool":30}],11:[function(require,module,exports){
 /**
  * Bit twiddling hacks for JavaScript.
  *
@@ -5859,7 +7240,7 @@ exports.nextCombination = function(v) {
 }
 
 
-},{}],8:[function(require,module,exports){
+},{}],12:[function(require,module,exports){
 "use strict"
 
 var bits = require("bit-twiddle")
@@ -6031,9 +7412,9 @@ function hiInorder(n, x) {
 }
 exports.hi = hiInorder
 
-},{"bit-twiddle":9}],9:[function(require,module,exports){
-module.exports=require(7)
-},{}],10:[function(require,module,exports){
+},{"bit-twiddle":13}],13:[function(require,module,exports){
+module.exports=require(11)
+},{}],14:[function(require,module,exports){
 "use strict"
 
 var compile = require("cwise-compiler")
@@ -6496,7 +7877,7 @@ exports.equals = compile({
 
 
 
-},{"cwise-compiler":11}],11:[function(require,module,exports){
+},{"cwise-compiler":15}],15:[function(require,module,exports){
 "use strict"
 
 var createThunk = require("./lib/thunk.js")
@@ -6604,7 +7985,7 @@ function compileCwise(user_args) {
 
 module.exports = compileCwise
 
-},{"./lib/thunk.js":13}],12:[function(require,module,exports){
+},{"./lib/thunk.js":17}],16:[function(require,module,exports){
 "use strict"
 
 var uniq = require("uniq")
@@ -6892,7 +8273,7 @@ function generateCWiseOp(proc, typesig) {
   return f()
 }
 module.exports = generateCWiseOp
-},{"uniq":14}],13:[function(require,module,exports){
+},{"uniq":18}],17:[function(require,module,exports){
 "use strict"
 
 var compile = require("./compile.js")
@@ -6941,7 +8322,7 @@ function createThunk(proc) {
 
 module.exports = createThunk
 
-},{"./compile.js":12}],14:[function(require,module,exports){
+},{"./compile.js":16}],18:[function(require,module,exports){
 "use strict"
 
 function unique_pred(list, compare) {
@@ -7000,7 +8381,7 @@ function unique(list, compare, sorted) {
 
 module.exports = unique
 
-},{}],15:[function(require,module,exports){
+},{}],19:[function(require,module,exports){
 "use strict"
 
 var ndarray = require("ndarray")
@@ -7023,10 +8404,10 @@ module.exports = function convert(arr, result) {
   return result
 }
 
-},{"./doConvert.js":16,"ndarray":23}],16:[function(require,module,exports){
+},{"./doConvert.js":20,"ndarray":27}],20:[function(require,module,exports){
 module.exports=require('cwise-compiler')({"args":["array","scalar","index"],"pre":{"body":"{}","args":[],"thisVars":[],"localVars":[]},"body":{"body":"{\nvar _inline_1_v=_inline_1_arg1_,_inline_1_i\nfor(_inline_1_i=0;_inline_1_i<_inline_1_arg2_.length-1;++_inline_1_i) {\n_inline_1_v=_inline_1_v[_inline_1_arg2_[_inline_1_i]]\n}\n_inline_1_arg0_=_inline_1_v[_inline_1_arg2_[_inline_1_arg2_.length-1]]\n}","args":[{"name":"_inline_1_arg0_","lvalue":true,"rvalue":false,"count":1},{"name":"_inline_1_arg1_","lvalue":false,"rvalue":true,"count":1},{"name":"_inline_1_arg2_","lvalue":false,"rvalue":true,"count":4}],"thisVars":[],"localVars":["_inline_1_i","_inline_1_v"]},"post":{"body":"{}","args":[],"thisVars":[],"localVars":[]},"funcName":"convert","blockSize":64})
 
-},{"cwise-compiler":17}],17:[function(require,module,exports){
+},{"cwise-compiler":21}],21:[function(require,module,exports){
 "use strict"
 
 var createThunk = require("./lib/thunk.js")
@@ -7134,7 +8515,7 @@ function compileCwise(user_args) {
 
 module.exports = compileCwise
 
-},{"./lib/thunk.js":19}],18:[function(require,module,exports){
+},{"./lib/thunk.js":23}],22:[function(require,module,exports){
 "use strict"
 
 var uniq = require("uniq")
@@ -7418,9 +8799,9 @@ function generateCWiseOp(proc, typesig) {
   return f()
 }
 module.exports = generateCWiseOp
-},{"uniq":20}],19:[function(require,module,exports){
-arguments[4][13][0].apply(exports,arguments)
-},{"./compile.js":18}],20:[function(require,module,exports){
+},{"uniq":24}],23:[function(require,module,exports){
+arguments[4][17][0].apply(exports,arguments)
+},{"./compile.js":22}],24:[function(require,module,exports){
 "use strict"
 
 function unique_pred(list, compare) {
@@ -7478,7 +8859,7 @@ function unique(list, compare, sorted) {
 }
 
 module.exports = unique
-},{}],21:[function(require,module,exports){
+},{}],25:[function(require,module,exports){
 "use strict"
 
 var ndarray = require("ndarray")
@@ -7537,7 +8918,7 @@ function zeros(shape, dtype) {
   return ndarray(buf, shape, stride, 0)
 }
 exports.zeros = zeros
-},{"ndarray":23,"ndarray-ops":10,"typedarray-pool":26}],22:[function(require,module,exports){
+},{"ndarray":27,"ndarray-ops":14,"typedarray-pool":30}],26:[function(require,module,exports){
 "use strict"
 
 module.exports = ndSelect
@@ -7773,7 +9154,7 @@ function ndSelect(array, k, compare) {
     return proc(array, k)
   }
 }
-},{}],23:[function(require,module,exports){
+},{}],27:[function(require,module,exports){
 (function (Buffer){
 var iota = require("iota-array")
 
@@ -8173,7 +9554,7 @@ function wrappedNDArrayCtor(data, shape, stride, offset) {
 
 module.exports = wrappedNDArrayCtor
 }).call(this,require("buffer").Buffer)
-},{"buffer":28,"iota-array":24}],24:[function(require,module,exports){
+},{"buffer":2,"iota-array":28}],28:[function(require,module,exports){
 "use strict"
 
 function iota(n) {
@@ -8185,7 +9566,7 @@ function iota(n) {
 }
 
 module.exports = iota
-},{}],25:[function(require,module,exports){
+},{}],29:[function(require,module,exports){
 "use strict"
 
 function dupe_array(count, value, i) {
@@ -8235,7 +9616,7 @@ function dupe(count, value) {
 }
 
 module.exports = dupe
-},{}],26:[function(require,module,exports){
+},{}],30:[function(require,module,exports){
 (function (global,Buffer){
 var bits = require("bit-twiddle")
 var dup = require("dup")
@@ -8605,1335 +9986,14 @@ exports.clearCache = function clearCache() {
   }
 }
 }).call(this,typeof self !== "undefined" ? self : typeof window !== "undefined" ? window : {},require("buffer").Buffer)
-},{"bit-twiddle":7,"buffer":28,"dup":25}],27:[function(require,module,exports){
-
-},{}],28:[function(require,module,exports){
-/*!
- * The buffer module from node.js, for the browser.
- *
- * @author   Feross Aboukhadijeh <feross@feross.org> <http://feross.org>
- * @license  MIT
- */
-
-var base64 = require('base64-js')
-var ieee754 = require('ieee754')
-
-exports.Buffer = Buffer
-exports.SlowBuffer = Buffer
-exports.INSPECT_MAX_BYTES = 50
-Buffer.poolSize = 8192
-
-/**
- * If `Buffer._useTypedArrays`:
- *   === true    Use Uint8Array implementation (fastest)
- *   === false   Use Object implementation (compatible down to IE6)
- */
-Buffer._useTypedArrays = (function () {
-  // Detect if browser supports Typed Arrays. Supported browsers are IE 10+, Firefox 4+,
-  // Chrome 7+, Safari 5.1+, Opera 11.6+, iOS 4.2+. If the browser does not support adding
-  // properties to `Uint8Array` instances, then that's the same as no `Uint8Array` support
-  // because we need to be able to add all the node Buffer API methods. This is an issue
-  // in Firefox 4-29. Now fixed: https://bugzilla.mozilla.org/show_bug.cgi?id=695438
-  try {
-    var buf = new ArrayBuffer(0)
-    var arr = new Uint8Array(buf)
-    arr.foo = function () { return 42 }
-    return 42 === arr.foo() &&
-        typeof arr.subarray === 'function' // Chrome 9-10 lack `subarray`
-  } catch (e) {
-    return false
-  }
-})()
-
-/**
- * Class: Buffer
- * =============
- *
- * The Buffer constructor returns instances of `Uint8Array` that are augmented
- * with function properties for all the node `Buffer` API functions. We use
- * `Uint8Array` so that square bracket notation works as expected -- it returns
- * a single octet.
- *
- * By augmenting the instances, we can avoid modifying the `Uint8Array`
- * prototype.
- */
-function Buffer (subject, encoding, noZero) {
-  if (!(this instanceof Buffer))
-    return new Buffer(subject, encoding, noZero)
-
-  var type = typeof subject
-
-  // Workaround: node's base64 implementation allows for non-padded strings
-  // while base64-js does not.
-  if (encoding === 'base64' && type === 'string') {
-    subject = stringtrim(subject)
-    while (subject.length % 4 !== 0) {
-      subject = subject + '='
-    }
-  }
-
-  // Find the length
-  var length
-  if (type === 'number')
-    length = coerce(subject)
-  else if (type === 'string')
-    length = Buffer.byteLength(subject, encoding)
-  else if (type === 'object')
-    length = coerce(subject.length) // assume that object is array-like
-  else
-    throw new Error('First argument needs to be a number, array or string.')
-
-  var buf
-  if (Buffer._useTypedArrays) {
-    // Preferred: Return an augmented `Uint8Array` instance for best performance
-    buf = Buffer._augment(new Uint8Array(length))
-  } else {
-    // Fallback: Return THIS instance of Buffer (created by `new`)
-    buf = this
-    buf.length = length
-    buf._isBuffer = true
-  }
-
-  var i
-  if (Buffer._useTypedArrays && typeof subject.byteLength === 'number') {
-    // Speed optimization -- use set if we're copying from a typed array
-    buf._set(subject)
-  } else if (isArrayish(subject)) {
-    // Treat array-ish objects as a byte array
-    for (i = 0; i < length; i++) {
-      if (Buffer.isBuffer(subject))
-        buf[i] = subject.readUInt8(i)
-      else
-        buf[i] = subject[i]
-    }
-  } else if (type === 'string') {
-    buf.write(subject, 0, encoding)
-  } else if (type === 'number' && !Buffer._useTypedArrays && !noZero) {
-    for (i = 0; i < length; i++) {
-      buf[i] = 0
-    }
-  }
-
-  return buf
-}
-
-// STATIC METHODS
-// ==============
-
-Buffer.isEncoding = function (encoding) {
-  switch (String(encoding).toLowerCase()) {
-    case 'hex':
-    case 'utf8':
-    case 'utf-8':
-    case 'ascii':
-    case 'binary':
-    case 'base64':
-    case 'raw':
-    case 'ucs2':
-    case 'ucs-2':
-    case 'utf16le':
-    case 'utf-16le':
-      return true
-    default:
-      return false
-  }
-}
-
-Buffer.isBuffer = function (b) {
-  return !!(b !== null && b !== undefined && b._isBuffer)
-}
-
-Buffer.byteLength = function (str, encoding) {
-  var ret
-  str = str + ''
-  switch (encoding || 'utf8') {
-    case 'hex':
-      ret = str.length / 2
-      break
-    case 'utf8':
-    case 'utf-8':
-      ret = utf8ToBytes(str).length
-      break
-    case 'ascii':
-    case 'binary':
-    case 'raw':
-      ret = str.length
-      break
-    case 'base64':
-      ret = base64ToBytes(str).length
-      break
-    case 'ucs2':
-    case 'ucs-2':
-    case 'utf16le':
-    case 'utf-16le':
-      ret = str.length * 2
-      break
-    default:
-      throw new Error('Unknown encoding')
-  }
-  return ret
-}
-
-Buffer.concat = function (list, totalLength) {
-  assert(isArray(list), 'Usage: Buffer.concat(list, [totalLength])\n' +
-      'list should be an Array.')
-
-  if (list.length === 0) {
-    return new Buffer(0)
-  } else if (list.length === 1) {
-    return list[0]
-  }
-
-  var i
-  if (typeof totalLength !== 'number') {
-    totalLength = 0
-    for (i = 0; i < list.length; i++) {
-      totalLength += list[i].length
-    }
-  }
-
-  var buf = new Buffer(totalLength)
-  var pos = 0
-  for (i = 0; i < list.length; i++) {
-    var item = list[i]
-    item.copy(buf, pos)
-    pos += item.length
-  }
-  return buf
-}
-
-// BUFFER INSTANCE METHODS
-// =======================
-
-function _hexWrite (buf, string, offset, length) {
-  offset = Number(offset) || 0
-  var remaining = buf.length - offset
-  if (!length) {
-    length = remaining
-  } else {
-    length = Number(length)
-    if (length > remaining) {
-      length = remaining
-    }
-  }
-
-  // must be an even number of digits
-  var strLen = string.length
-  assert(strLen % 2 === 0, 'Invalid hex string')
-
-  if (length > strLen / 2) {
-    length = strLen / 2
-  }
-  for (var i = 0; i < length; i++) {
-    var byte = parseInt(string.substr(i * 2, 2), 16)
-    assert(!isNaN(byte), 'Invalid hex string')
-    buf[offset + i] = byte
-  }
-  Buffer._charsWritten = i * 2
-  return i
-}
-
-function _utf8Write (buf, string, offset, length) {
-  var charsWritten = Buffer._charsWritten =
-    blitBuffer(utf8ToBytes(string), buf, offset, length)
-  return charsWritten
-}
-
-function _asciiWrite (buf, string, offset, length) {
-  var charsWritten = Buffer._charsWritten =
-    blitBuffer(asciiToBytes(string), buf, offset, length)
-  return charsWritten
-}
-
-function _binaryWrite (buf, string, offset, length) {
-  return _asciiWrite(buf, string, offset, length)
-}
-
-function _base64Write (buf, string, offset, length) {
-  var charsWritten = Buffer._charsWritten =
-    blitBuffer(base64ToBytes(string), buf, offset, length)
-  return charsWritten
-}
-
-function _utf16leWrite (buf, string, offset, length) {
-  var charsWritten = Buffer._charsWritten =
-    blitBuffer(utf16leToBytes(string), buf, offset, length)
-  return charsWritten
-}
-
-Buffer.prototype.write = function (string, offset, length, encoding) {
-  // Support both (string, offset, length, encoding)
-  // and the legacy (string, encoding, offset, length)
-  if (isFinite(offset)) {
-    if (!isFinite(length)) {
-      encoding = length
-      length = undefined
-    }
-  } else {  // legacy
-    var swap = encoding
-    encoding = offset
-    offset = length
-    length = swap
-  }
-
-  offset = Number(offset) || 0
-  var remaining = this.length - offset
-  if (!length) {
-    length = remaining
-  } else {
-    length = Number(length)
-    if (length > remaining) {
-      length = remaining
-    }
-  }
-  encoding = String(encoding || 'utf8').toLowerCase()
-
-  var ret
-  switch (encoding) {
-    case 'hex':
-      ret = _hexWrite(this, string, offset, length)
-      break
-    case 'utf8':
-    case 'utf-8':
-      ret = _utf8Write(this, string, offset, length)
-      break
-    case 'ascii':
-      ret = _asciiWrite(this, string, offset, length)
-      break
-    case 'binary':
-      ret = _binaryWrite(this, string, offset, length)
-      break
-    case 'base64':
-      ret = _base64Write(this, string, offset, length)
-      break
-    case 'ucs2':
-    case 'ucs-2':
-    case 'utf16le':
-    case 'utf-16le':
-      ret = _utf16leWrite(this, string, offset, length)
-      break
-    default:
-      throw new Error('Unknown encoding')
-  }
-  return ret
-}
-
-Buffer.prototype.toString = function (encoding, start, end) {
-  var self = this
-
-  encoding = String(encoding || 'utf8').toLowerCase()
-  start = Number(start) || 0
-  end = (end !== undefined)
-    ? Number(end)
-    : end = self.length
-
-  // Fastpath empty strings
-  if (end === start)
-    return ''
-
-  var ret
-  switch (encoding) {
-    case 'hex':
-      ret = _hexSlice(self, start, end)
-      break
-    case 'utf8':
-    case 'utf-8':
-      ret = _utf8Slice(self, start, end)
-      break
-    case 'ascii':
-      ret = _asciiSlice(self, start, end)
-      break
-    case 'binary':
-      ret = _binarySlice(self, start, end)
-      break
-    case 'base64':
-      ret = _base64Slice(self, start, end)
-      break
-    case 'ucs2':
-    case 'ucs-2':
-    case 'utf16le':
-    case 'utf-16le':
-      ret = _utf16leSlice(self, start, end)
-      break
-    default:
-      throw new Error('Unknown encoding')
-  }
-  return ret
-}
-
-Buffer.prototype.toJSON = function () {
-  return {
-    type: 'Buffer',
-    data: Array.prototype.slice.call(this._arr || this, 0)
-  }
-}
-
-// copy(targetBuffer, targetStart=0, sourceStart=0, sourceEnd=buffer.length)
-Buffer.prototype.copy = function (target, target_start, start, end) {
-  var source = this
-
-  if (!start) start = 0
-  if (!end && end !== 0) end = this.length
-  if (!target_start) target_start = 0
-
-  // Copy 0 bytes; we're done
-  if (end === start) return
-  if (target.length === 0 || source.length === 0) return
-
-  // Fatal error conditions
-  assert(end >= start, 'sourceEnd < sourceStart')
-  assert(target_start >= 0 && target_start < target.length,
-      'targetStart out of bounds')
-  assert(start >= 0 && start < source.length, 'sourceStart out of bounds')
-  assert(end >= 0 && end <= source.length, 'sourceEnd out of bounds')
-
-  // Are we oob?
-  if (end > this.length)
-    end = this.length
-  if (target.length - target_start < end - start)
-    end = target.length - target_start + start
-
-  var len = end - start
-
-  if (len < 100 || !Buffer._useTypedArrays) {
-    for (var i = 0; i < len; i++)
-      target[i + target_start] = this[i + start]
-  } else {
-    target._set(this.subarray(start, start + len), target_start)
-  }
-}
-
-function _base64Slice (buf, start, end) {
-  if (start === 0 && end === buf.length) {
-    return base64.fromByteArray(buf)
-  } else {
-    return base64.fromByteArray(buf.slice(start, end))
-  }
-}
-
-function _utf8Slice (buf, start, end) {
-  var res = ''
-  var tmp = ''
-  end = Math.min(buf.length, end)
-
-  for (var i = start; i < end; i++) {
-    if (buf[i] <= 0x7F) {
-      res += decodeUtf8Char(tmp) + String.fromCharCode(buf[i])
-      tmp = ''
-    } else {
-      tmp += '%' + buf[i].toString(16)
-    }
-  }
-
-  return res + decodeUtf8Char(tmp)
-}
-
-function _asciiSlice (buf, start, end) {
-  var ret = ''
-  end = Math.min(buf.length, end)
-
-  for (var i = start; i < end; i++)
-    ret += String.fromCharCode(buf[i])
-  return ret
-}
-
-function _binarySlice (buf, start, end) {
-  return _asciiSlice(buf, start, end)
-}
-
-function _hexSlice (buf, start, end) {
-  var len = buf.length
-
-  if (!start || start < 0) start = 0
-  if (!end || end < 0 || end > len) end = len
-
-  var out = ''
-  for (var i = start; i < end; i++) {
-    out += toHex(buf[i])
-  }
-  return out
-}
-
-function _utf16leSlice (buf, start, end) {
-  var bytes = buf.slice(start, end)
-  var res = ''
-  for (var i = 0; i < bytes.length; i += 2) {
-    res += String.fromCharCode(bytes[i] + bytes[i+1] * 256)
-  }
-  return res
-}
-
-Buffer.prototype.slice = function (start, end) {
-  var len = this.length
-  start = clamp(start, len, 0)
-  end = clamp(end, len, len)
-
-  if (Buffer._useTypedArrays) {
-    return Buffer._augment(this.subarray(start, end))
-  } else {
-    var sliceLen = end - start
-    var newBuf = new Buffer(sliceLen, undefined, true)
-    for (var i = 0; i < sliceLen; i++) {
-      newBuf[i] = this[i + start]
-    }
-    return newBuf
-  }
-}
-
-// `get` will be removed in Node 0.13+
-Buffer.prototype.get = function (offset) {
-  console.log('.get() is deprecated. Access using array indexes instead.')
-  return this.readUInt8(offset)
-}
-
-// `set` will be removed in Node 0.13+
-Buffer.prototype.set = function (v, offset) {
-  console.log('.set() is deprecated. Access using array indexes instead.')
-  return this.writeUInt8(v, offset)
-}
-
-Buffer.prototype.readUInt8 = function (offset, noAssert) {
-  if (!noAssert) {
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset < this.length, 'Trying to read beyond buffer length')
-  }
-
-  if (offset >= this.length)
-    return
-
-  return this[offset]
-}
-
-function _readUInt16 (buf, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 1 < buf.length, 'Trying to read beyond buffer length')
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  var val
-  if (littleEndian) {
-    val = buf[offset]
-    if (offset + 1 < len)
-      val |= buf[offset + 1] << 8
-  } else {
-    val = buf[offset] << 8
-    if (offset + 1 < len)
-      val |= buf[offset + 1]
-  }
-  return val
-}
-
-Buffer.prototype.readUInt16LE = function (offset, noAssert) {
-  return _readUInt16(this, offset, true, noAssert)
-}
-
-Buffer.prototype.readUInt16BE = function (offset, noAssert) {
-  return _readUInt16(this, offset, false, noAssert)
-}
-
-function _readUInt32 (buf, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 3 < buf.length, 'Trying to read beyond buffer length')
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  var val
-  if (littleEndian) {
-    if (offset + 2 < len)
-      val = buf[offset + 2] << 16
-    if (offset + 1 < len)
-      val |= buf[offset + 1] << 8
-    val |= buf[offset]
-    if (offset + 3 < len)
-      val = val + (buf[offset + 3] << 24 >>> 0)
-  } else {
-    if (offset + 1 < len)
-      val = buf[offset + 1] << 16
-    if (offset + 2 < len)
-      val |= buf[offset + 2] << 8
-    if (offset + 3 < len)
-      val |= buf[offset + 3]
-    val = val + (buf[offset] << 24 >>> 0)
-  }
-  return val
-}
-
-Buffer.prototype.readUInt32LE = function (offset, noAssert) {
-  return _readUInt32(this, offset, true, noAssert)
-}
-
-Buffer.prototype.readUInt32BE = function (offset, noAssert) {
-  return _readUInt32(this, offset, false, noAssert)
-}
-
-Buffer.prototype.readInt8 = function (offset, noAssert) {
-  if (!noAssert) {
-    assert(offset !== undefined && offset !== null,
-        'missing offset')
-    assert(offset < this.length, 'Trying to read beyond buffer length')
-  }
-
-  if (offset >= this.length)
-    return
-
-  var neg = this[offset] & 0x80
-  if (neg)
-    return (0xff - this[offset] + 1) * -1
-  else
-    return this[offset]
-}
-
-function _readInt16 (buf, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 1 < buf.length, 'Trying to read beyond buffer length')
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  var val = _readUInt16(buf, offset, littleEndian, true)
-  var neg = val & 0x8000
-  if (neg)
-    return (0xffff - val + 1) * -1
-  else
-    return val
-}
-
-Buffer.prototype.readInt16LE = function (offset, noAssert) {
-  return _readInt16(this, offset, true, noAssert)
-}
-
-Buffer.prototype.readInt16BE = function (offset, noAssert) {
-  return _readInt16(this, offset, false, noAssert)
-}
-
-function _readInt32 (buf, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 3 < buf.length, 'Trying to read beyond buffer length')
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  var val = _readUInt32(buf, offset, littleEndian, true)
-  var neg = val & 0x80000000
-  if (neg)
-    return (0xffffffff - val + 1) * -1
-  else
-    return val
-}
-
-Buffer.prototype.readInt32LE = function (offset, noAssert) {
-  return _readInt32(this, offset, true, noAssert)
-}
-
-Buffer.prototype.readInt32BE = function (offset, noAssert) {
-  return _readInt32(this, offset, false, noAssert)
-}
-
-function _readFloat (buf, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset + 3 < buf.length, 'Trying to read beyond buffer length')
-  }
-
-  return ieee754.read(buf, offset, littleEndian, 23, 4)
-}
-
-Buffer.prototype.readFloatLE = function (offset, noAssert) {
-  return _readFloat(this, offset, true, noAssert)
-}
-
-Buffer.prototype.readFloatBE = function (offset, noAssert) {
-  return _readFloat(this, offset, false, noAssert)
-}
-
-function _readDouble (buf, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset + 7 < buf.length, 'Trying to read beyond buffer length')
-  }
-
-  return ieee754.read(buf, offset, littleEndian, 52, 8)
-}
-
-Buffer.prototype.readDoubleLE = function (offset, noAssert) {
-  return _readDouble(this, offset, true, noAssert)
-}
-
-Buffer.prototype.readDoubleBE = function (offset, noAssert) {
-  return _readDouble(this, offset, false, noAssert)
-}
-
-Buffer.prototype.writeUInt8 = function (value, offset, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset < this.length, 'trying to write beyond buffer length')
-    verifuint(value, 0xff)
-  }
-
-  if (offset >= this.length) return
-
-  this[offset] = value
-}
-
-function _writeUInt16 (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 1 < buf.length, 'trying to write beyond buffer length')
-    verifuint(value, 0xffff)
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  for (var i = 0, j = Math.min(len - offset, 2); i < j; i++) {
-    buf[offset + i] =
-        (value & (0xff << (8 * (littleEndian ? i : 1 - i)))) >>>
-            (littleEndian ? i : 1 - i) * 8
-  }
-}
-
-Buffer.prototype.writeUInt16LE = function (value, offset, noAssert) {
-  _writeUInt16(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeUInt16BE = function (value, offset, noAssert) {
-  _writeUInt16(this, value, offset, false, noAssert)
-}
-
-function _writeUInt32 (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 3 < buf.length, 'trying to write beyond buffer length')
-    verifuint(value, 0xffffffff)
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  for (var i = 0, j = Math.min(len - offset, 4); i < j; i++) {
-    buf[offset + i] =
-        (value >>> (littleEndian ? i : 3 - i) * 8) & 0xff
-  }
-}
-
-Buffer.prototype.writeUInt32LE = function (value, offset, noAssert) {
-  _writeUInt32(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeUInt32BE = function (value, offset, noAssert) {
-  _writeUInt32(this, value, offset, false, noAssert)
-}
-
-Buffer.prototype.writeInt8 = function (value, offset, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset < this.length, 'Trying to write beyond buffer length')
-    verifsint(value, 0x7f, -0x80)
-  }
-
-  if (offset >= this.length)
-    return
-
-  if (value >= 0)
-    this.writeUInt8(value, offset, noAssert)
-  else
-    this.writeUInt8(0xff + value + 1, offset, noAssert)
-}
-
-function _writeInt16 (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 1 < buf.length, 'Trying to write beyond buffer length')
-    verifsint(value, 0x7fff, -0x8000)
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  if (value >= 0)
-    _writeUInt16(buf, value, offset, littleEndian, noAssert)
-  else
-    _writeUInt16(buf, 0xffff + value + 1, offset, littleEndian, noAssert)
-}
-
-Buffer.prototype.writeInt16LE = function (value, offset, noAssert) {
-  _writeInt16(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeInt16BE = function (value, offset, noAssert) {
-  _writeInt16(this, value, offset, false, noAssert)
-}
-
-function _writeInt32 (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 3 < buf.length, 'Trying to write beyond buffer length')
-    verifsint(value, 0x7fffffff, -0x80000000)
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  if (value >= 0)
-    _writeUInt32(buf, value, offset, littleEndian, noAssert)
-  else
-    _writeUInt32(buf, 0xffffffff + value + 1, offset, littleEndian, noAssert)
-}
-
-Buffer.prototype.writeInt32LE = function (value, offset, noAssert) {
-  _writeInt32(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeInt32BE = function (value, offset, noAssert) {
-  _writeInt32(this, value, offset, false, noAssert)
-}
-
-function _writeFloat (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 3 < buf.length, 'Trying to write beyond buffer length')
-    verifIEEE754(value, 3.4028234663852886e+38, -3.4028234663852886e+38)
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  ieee754.write(buf, value, offset, littleEndian, 23, 4)
-}
-
-Buffer.prototype.writeFloatLE = function (value, offset, noAssert) {
-  _writeFloat(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeFloatBE = function (value, offset, noAssert) {
-  _writeFloat(this, value, offset, false, noAssert)
-}
-
-function _writeDouble (buf, value, offset, littleEndian, noAssert) {
-  if (!noAssert) {
-    assert(value !== undefined && value !== null, 'missing value')
-    assert(typeof littleEndian === 'boolean', 'missing or invalid endian')
-    assert(offset !== undefined && offset !== null, 'missing offset')
-    assert(offset + 7 < buf.length,
-        'Trying to write beyond buffer length')
-    verifIEEE754(value, 1.7976931348623157E+308, -1.7976931348623157E+308)
-  }
-
-  var len = buf.length
-  if (offset >= len)
-    return
-
-  ieee754.write(buf, value, offset, littleEndian, 52, 8)
-}
-
-Buffer.prototype.writeDoubleLE = function (value, offset, noAssert) {
-  _writeDouble(this, value, offset, true, noAssert)
-}
-
-Buffer.prototype.writeDoubleBE = function (value, offset, noAssert) {
-  _writeDouble(this, value, offset, false, noAssert)
-}
-
-// fill(value, start=0, end=buffer.length)
-Buffer.prototype.fill = function (value, start, end) {
-  if (!value) value = 0
-  if (!start) start = 0
-  if (!end) end = this.length
-
-  if (typeof value === 'string') {
-    value = value.charCodeAt(0)
-  }
-
-  assert(typeof value === 'number' && !isNaN(value), 'value is not a number')
-  assert(end >= start, 'end < start')
-
-  // Fill 0 bytes; we're done
-  if (end === start) return
-  if (this.length === 0) return
-
-  assert(start >= 0 && start < this.length, 'start out of bounds')
-  assert(end >= 0 && end <= this.length, 'end out of bounds')
-
-  for (var i = start; i < end; i++) {
-    this[i] = value
-  }
-}
-
-Buffer.prototype.inspect = function () {
-  var out = []
-  var len = this.length
-  for (var i = 0; i < len; i++) {
-    out[i] = toHex(this[i])
-    if (i === exports.INSPECT_MAX_BYTES) {
-      out[i + 1] = '...'
-      break
-    }
-  }
-  return '<Buffer ' + out.join(' ') + '>'
-}
-
-/**
- * Creates a new `ArrayBuffer` with the *copied* memory of the buffer instance.
- * Added in Node 0.12. Only available in browsers that support ArrayBuffer.
- */
-Buffer.prototype.toArrayBuffer = function () {
-  if (typeof Uint8Array !== 'undefined') {
-    if (Buffer._useTypedArrays) {
-      return (new Buffer(this)).buffer
-    } else {
-      var buf = new Uint8Array(this.length)
-      for (var i = 0, len = buf.length; i < len; i += 1)
-        buf[i] = this[i]
-      return buf.buffer
-    }
-  } else {
-    throw new Error('Buffer.toArrayBuffer not supported in this browser')
-  }
-}
-
-// HELPER FUNCTIONS
-// ================
-
-function stringtrim (str) {
-  if (str.trim) return str.trim()
-  return str.replace(/^\s+|\s+$/g, '')
-}
-
-var BP = Buffer.prototype
-
-/**
- * Augment a Uint8Array *instance* (not the Uint8Array class!) with Buffer methods
- */
-Buffer._augment = function (arr) {
-  arr._isBuffer = true
-
-  // save reference to original Uint8Array get/set methods before overwriting
-  arr._get = arr.get
-  arr._set = arr.set
-
-  // deprecated, will be removed in node 0.13+
-  arr.get = BP.get
-  arr.set = BP.set
-
-  arr.write = BP.write
-  arr.toString = BP.toString
-  arr.toLocaleString = BP.toString
-  arr.toJSON = BP.toJSON
-  arr.copy = BP.copy
-  arr.slice = BP.slice
-  arr.readUInt8 = BP.readUInt8
-  arr.readUInt16LE = BP.readUInt16LE
-  arr.readUInt16BE = BP.readUInt16BE
-  arr.readUInt32LE = BP.readUInt32LE
-  arr.readUInt32BE = BP.readUInt32BE
-  arr.readInt8 = BP.readInt8
-  arr.readInt16LE = BP.readInt16LE
-  arr.readInt16BE = BP.readInt16BE
-  arr.readInt32LE = BP.readInt32LE
-  arr.readInt32BE = BP.readInt32BE
-  arr.readFloatLE = BP.readFloatLE
-  arr.readFloatBE = BP.readFloatBE
-  arr.readDoubleLE = BP.readDoubleLE
-  arr.readDoubleBE = BP.readDoubleBE
-  arr.writeUInt8 = BP.writeUInt8
-  arr.writeUInt16LE = BP.writeUInt16LE
-  arr.writeUInt16BE = BP.writeUInt16BE
-  arr.writeUInt32LE = BP.writeUInt32LE
-  arr.writeUInt32BE = BP.writeUInt32BE
-  arr.writeInt8 = BP.writeInt8
-  arr.writeInt16LE = BP.writeInt16LE
-  arr.writeInt16BE = BP.writeInt16BE
-  arr.writeInt32LE = BP.writeInt32LE
-  arr.writeInt32BE = BP.writeInt32BE
-  arr.writeFloatLE = BP.writeFloatLE
-  arr.writeFloatBE = BP.writeFloatBE
-  arr.writeDoubleLE = BP.writeDoubleLE
-  arr.writeDoubleBE = BP.writeDoubleBE
-  arr.fill = BP.fill
-  arr.inspect = BP.inspect
-  arr.toArrayBuffer = BP.toArrayBuffer
-
-  return arr
-}
-
-// slice(start, end)
-function clamp (index, len, defaultValue) {
-  if (typeof index !== 'number') return defaultValue
-  index = ~~index;  // Coerce to integer.
-  if (index >= len) return len
-  if (index >= 0) return index
-  index += len
-  if (index >= 0) return index
-  return 0
-}
-
-function coerce (length) {
-  // Coerce length to a number (possibly NaN), round up
-  // in case it's fractional (e.g. 123.456) then do a
-  // double negate to coerce a NaN to 0. Easy, right?
-  length = ~~Math.ceil(+length)
-  return length < 0 ? 0 : length
-}
-
-function isArray (subject) {
-  return (Array.isArray || function (subject) {
-    return Object.prototype.toString.call(subject) === '[object Array]'
-  })(subject)
-}
-
-function isArrayish (subject) {
-  return isArray(subject) || Buffer.isBuffer(subject) ||
-      subject && typeof subject === 'object' &&
-      typeof subject.length === 'number'
-}
-
-function toHex (n) {
-  if (n < 16) return '0' + n.toString(16)
-  return n.toString(16)
-}
-
-function utf8ToBytes (str) {
-  var byteArray = []
-  for (var i = 0; i < str.length; i++) {
-    var b = str.charCodeAt(i)
-    if (b <= 0x7F)
-      byteArray.push(str.charCodeAt(i))
-    else {
-      var start = i
-      if (b >= 0xD800 && b <= 0xDFFF) i++
-      var h = encodeURIComponent(str.slice(start, i+1)).substr(1).split('%')
-      for (var j = 0; j < h.length; j++)
-        byteArray.push(parseInt(h[j], 16))
-    }
-  }
-  return byteArray
-}
-
-function asciiToBytes (str) {
-  var byteArray = []
-  for (var i = 0; i < str.length; i++) {
-    // Node's code seems to be doing this and not & 0x7F..
-    byteArray.push(str.charCodeAt(i) & 0xFF)
-  }
-  return byteArray
-}
-
-function utf16leToBytes (str) {
-  var c, hi, lo
-  var byteArray = []
-  for (var i = 0; i < str.length; i++) {
-    c = str.charCodeAt(i)
-    hi = c >> 8
-    lo = c % 256
-    byteArray.push(lo)
-    byteArray.push(hi)
-  }
-
-  return byteArray
-}
-
-function base64ToBytes (str) {
-  return base64.toByteArray(str)
-}
-
-function blitBuffer (src, dst, offset, length) {
-  var pos
-  for (var i = 0; i < length; i++) {
-    if ((i + offset >= dst.length) || (i >= src.length))
-      break
-    dst[i + offset] = src[i]
-  }
-  return i
-}
-
-function decodeUtf8Char (str) {
-  try {
-    return decodeURIComponent(str)
-  } catch (err) {
-    return String.fromCharCode(0xFFFD) // UTF 8 invalid char
-  }
-}
-
-/*
- * We have to make sure that the value is a valid integer. This means that it
- * is non-negative. It has no fractional component and that it does not
- * exceed the maximum allowed value.
- */
-function verifuint (value, max) {
-  assert(typeof value === 'number', 'cannot write a non-number as a number')
-  assert(value >= 0, 'specified a negative value for writing an unsigned value')
-  assert(value <= max, 'value is larger than maximum value for type')
-  assert(Math.floor(value) === value, 'value has a fractional component')
-}
-
-function verifsint (value, max, min) {
-  assert(typeof value === 'number', 'cannot write a non-number as a number')
-  assert(value <= max, 'value larger than maximum allowed value')
-  assert(value >= min, 'value smaller than minimum allowed value')
-  assert(Math.floor(value) === value, 'value has a fractional component')
-}
-
-function verifIEEE754 (value, max, min) {
-  assert(typeof value === 'number', 'cannot write a non-number as a number')
-  assert(value <= max, 'value larger than maximum allowed value')
-  assert(value >= min, 'value smaller than minimum allowed value')
-}
-
-function assert (test, message) {
-  if (!test) throw new Error(message || 'Failed assertion')
-}
-
-},{"base64-js":29,"ieee754":30}],29:[function(require,module,exports){
-var lookup = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
-
-;(function (exports) {
-	'use strict';
-
-  var Arr = (typeof Uint8Array !== 'undefined')
-    ? Uint8Array
-    : Array
-
-	var PLUS   = '+'.charCodeAt(0)
-	var SLASH  = '/'.charCodeAt(0)
-	var NUMBER = '0'.charCodeAt(0)
-	var LOWER  = 'a'.charCodeAt(0)
-	var UPPER  = 'A'.charCodeAt(0)
-
-	function decode (elt) {
-		var code = elt.charCodeAt(0)
-		if (code === PLUS)
-			return 62 // '+'
-		if (code === SLASH)
-			return 63 // '/'
-		if (code < NUMBER)
-			return -1 //no match
-		if (code < NUMBER + 10)
-			return code - NUMBER + 26 + 26
-		if (code < UPPER + 26)
-			return code - UPPER
-		if (code < LOWER + 26)
-			return code - LOWER + 26
-	}
-
-	function b64ToByteArray (b64) {
-		var i, j, l, tmp, placeHolders, arr
-
-		if (b64.length % 4 > 0) {
-			throw new Error('Invalid string. Length must be a multiple of 4')
-		}
-
-		// the number of equal signs (place holders)
-		// if there are two placeholders, than the two characters before it
-		// represent one byte
-		// if there is only one, then the three characters before it represent 2 bytes
-		// this is just a cheap hack to not do indexOf twice
-		var len = b64.length
-		placeHolders = '=' === b64.charAt(len - 2) ? 2 : '=' === b64.charAt(len - 1) ? 1 : 0
-
-		// base64 is 4/3 + up to two characters of the original data
-		arr = new Arr(b64.length * 3 / 4 - placeHolders)
-
-		// if there are placeholders, only get up to the last complete 4 chars
-		l = placeHolders > 0 ? b64.length - 4 : b64.length
-
-		var L = 0
-
-		function push (v) {
-			arr[L++] = v
-		}
-
-		for (i = 0, j = 0; i < l; i += 4, j += 3) {
-			tmp = (decode(b64.charAt(i)) << 18) | (decode(b64.charAt(i + 1)) << 12) | (decode(b64.charAt(i + 2)) << 6) | decode(b64.charAt(i + 3))
-			push((tmp & 0xFF0000) >> 16)
-			push((tmp & 0xFF00) >> 8)
-			push(tmp & 0xFF)
-		}
-
-		if (placeHolders === 2) {
-			tmp = (decode(b64.charAt(i)) << 2) | (decode(b64.charAt(i + 1)) >> 4)
-			push(tmp & 0xFF)
-		} else if (placeHolders === 1) {
-			tmp = (decode(b64.charAt(i)) << 10) | (decode(b64.charAt(i + 1)) << 4) | (decode(b64.charAt(i + 2)) >> 2)
-			push((tmp >> 8) & 0xFF)
-			push(tmp & 0xFF)
-		}
-
-		return arr
-	}
-
-	function uint8ToBase64 (uint8) {
-		var i,
-			extraBytes = uint8.length % 3, // if we have 1 byte left, pad 2 bytes
-			output = "",
-			temp, length
-
-		function encode (num) {
-			return lookup.charAt(num)
-		}
-
-		function tripletToBase64 (num) {
-			return encode(num >> 18 & 0x3F) + encode(num >> 12 & 0x3F) + encode(num >> 6 & 0x3F) + encode(num & 0x3F)
-		}
-
-		// go through the array every three bytes, we'll deal with trailing stuff later
-		for (i = 0, length = uint8.length - extraBytes; i < length; i += 3) {
-			temp = (uint8[i] << 16) + (uint8[i + 1] << 8) + (uint8[i + 2])
-			output += tripletToBase64(temp)
-		}
-
-		// pad the end with zeros, but make sure to not forget the extra bytes
-		switch (extraBytes) {
-			case 1:
-				temp = uint8[uint8.length - 1]
-				output += encode(temp >> 2)
-				output += encode((temp << 4) & 0x3F)
-				output += '=='
-				break
-			case 2:
-				temp = (uint8[uint8.length - 2] << 8) + (uint8[uint8.length - 1])
-				output += encode(temp >> 10)
-				output += encode((temp >> 4) & 0x3F)
-				output += encode((temp << 2) & 0x3F)
-				output += '='
-				break
-		}
-
-		return output
-	}
-
-	exports.toByteArray = b64ToByteArray
-	exports.fromByteArray = uint8ToBase64
-}(typeof exports === 'undefined' ? (this.base64js = {}) : exports))
-
-},{}],30:[function(require,module,exports){
-exports.read = function(buffer, offset, isLE, mLen, nBytes) {
-  var e, m,
-      eLen = nBytes * 8 - mLen - 1,
-      eMax = (1 << eLen) - 1,
-      eBias = eMax >> 1,
-      nBits = -7,
-      i = isLE ? (nBytes - 1) : 0,
-      d = isLE ? -1 : 1,
-      s = buffer[offset + i];
-
-  i += d;
-
-  e = s & ((1 << (-nBits)) - 1);
-  s >>= (-nBits);
-  nBits += eLen;
-  for (; nBits > 0; e = e * 256 + buffer[offset + i], i += d, nBits -= 8);
-
-  m = e & ((1 << (-nBits)) - 1);
-  e >>= (-nBits);
-  nBits += mLen;
-  for (; nBits > 0; m = m * 256 + buffer[offset + i], i += d, nBits -= 8);
-
-  if (e === 0) {
-    e = 1 - eBias;
-  } else if (e === eMax) {
-    return m ? NaN : ((s ? -1 : 1) * Infinity);
-  } else {
-    m = m + Math.pow(2, mLen);
-    e = e - eBias;
-  }
-  return (s ? -1 : 1) * m * Math.pow(2, e - mLen);
-};
-
-exports.write = function(buffer, value, offset, isLE, mLen, nBytes) {
-  var e, m, c,
-      eLen = nBytes * 8 - mLen - 1,
-      eMax = (1 << eLen) - 1,
-      eBias = eMax >> 1,
-      rt = (mLen === 23 ? Math.pow(2, -24) - Math.pow(2, -77) : 0),
-      i = isLE ? 0 : (nBytes - 1),
-      d = isLE ? 1 : -1,
-      s = value < 0 || (value === 0 && 1 / value < 0) ? 1 : 0;
-
-  value = Math.abs(value);
-
-  if (isNaN(value) || value === Infinity) {
-    m = isNaN(value) ? 1 : 0;
-    e = eMax;
-  } else {
-    e = Math.floor(Math.log(value) / Math.LN2);
-    if (value * (c = Math.pow(2, -e)) < 1) {
-      e--;
-      c *= 2;
-    }
-    if (e + eBias >= 1) {
-      value += rt / c;
-    } else {
-      value += rt * Math.pow(2, 1 - eBias);
-    }
-    if (value * c >= 2) {
-      e++;
-      c /= 2;
-    }
-
-    if (e + eBias >= eMax) {
-      m = 0;
-      e = eMax;
-    } else if (e + eBias >= 1) {
-      m = (value * c - 1) * Math.pow(2, mLen);
-      e = e + eBias;
-    } else {
-      m = value * Math.pow(2, eBias - 1) * Math.pow(2, mLen);
-      e = 0;
-    }
-  }
-
-  for (; mLen >= 8; buffer[offset + i] = m & 0xff, i += d, m /= 256, mLen -= 8);
-
-  e = (e << mLen) | m;
-  eLen += mLen;
-  for (; eLen > 0; buffer[offset + i] = e & 0xff, i += d, e /= 256, eLen -= 8);
-
-  buffer[offset + i - d] |= s * 128;
-};
-
-},{}],31:[function(require,module,exports){
+},{"bit-twiddle":11,"buffer":2,"dup":29}],31:[function(require,module,exports){
 var fetchValue = require("../core/fetch/value.js"),
     fetchColor = require("../core/fetch/color.js"),
     fetchText  = require("../core/fetch/text.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Sorts an array of objects
 //------------------------------------------------------------------------------
-d3plus.array.sort = function( arr , keys , sort , colors , vars ) {
+d3plus.array.sort = function( arr , keys , sort , colors , vars , depth ) {
 
   if ( !arr || arr.length <= 1 || !keys ) {
     return arr || []
@@ -9947,11 +10007,12 @@ d3plus.array.sort = function( arr , keys , sort , colors , vars ) {
     keys = [ keys ]
   }
 
-  if ( !colors ) {
-    var colors = [ "color" ]
-  }
-  else if ( !(colors instanceof Array) ) {
+  if ( !(colors instanceof Array) ) {
     colors = [ colors ]
+  }
+
+  if (depth !== undefined && typeof depth !== "number") {
+    depth = vars.id.nesting.indexOf(depth)
   }
 
   function comparator( a , b ) {
@@ -9964,22 +10025,13 @@ d3plus.array.sort = function( arr , keys , sort , colors , vars ) {
 
       if ( vars ) {
 
-        var depthKey = a.d3plus ? vars.id.nesting[a.d3plus.depth] : undefined
-          , depthInt = a.d3plus ? a.d3plus.depth : undefined
+        a = k === vars.text.value
+          ? fetchText( vars , a , depth )
+          : fetchValue( vars , a , k , depth )
 
-        a = k === vars.color.value
-          ? fetchColor( vars , a , depthKey )
-          : k === vars.text.value
-          ? fetchText( vars , a , depthInt )
-          : fetchValue( vars , a , k , depthKey )
-
-        var depthKey = b.d3plus ? vars.id.nesting[b.d3plus.depth] : undefined
-          , depthInt = b.d3plus ? b.d3plus.depth : undefined
-        b = k === vars.color.value
-          ? fetchColor( vars , b , depthKey )
-          : k === vars.text.value
-          ? fetchText( vars , b , depthInt )
-          : fetchValue( vars , b , k , depthKey )
+        b = k === vars.text.value
+          ? fetchText( vars , b , depth )
+          : fetchValue( vars , b , k , depth )
 
       }
       else {
@@ -9987,13 +10039,18 @@ d3plus.array.sort = function( arr , keys , sort , colors , vars ) {
         b = b[k]
       }
 
-      a = a instanceof Array ? a = a[0]
-        : typeof a === "string" ? a = a.toLowerCase() : a
-      b = b instanceof Array ? b = b[0]
-        : typeof b === "string" ? b = b.toLowerCase() : b
-
-      retVal = colors.indexOf(k) >= 0 ? d3plus.color.sort( a , b )
-             : a < b ? -1 : 1
+      if (colors.indexOf(k) >= 0) {
+        a = fetchColor(vars, a, depth)
+        b = fetchColor(vars, b, depth)
+        retVal = d3plus.color.sort(a,b)
+      }
+      else {
+        a = a instanceof Array ? a = a[0]
+          : typeof a === "string" ? a = a.toLowerCase() : a
+        b = b instanceof Array ? b = b[0]
+          : typeof b === "string" ? b = b.toLowerCase() : b
+        retVal = a < b ? -1 : 1
+      }
 
       if ( retVal !== 0 || i === keys.length-1 ) {
         break
@@ -10014,7 +10071,7 @@ d3plus.array.sort = function( arr , keys , sort , colors , vars ) {
 
 }
 
-},{"../core/fetch/color.js":48,"../core/fetch/text.js":50,"../core/fetch/value.js":51}],32:[function(require,module,exports){
+},{"../core/fetch/color.js":49,"../core/fetch/text.js":51,"../core/fetch/value.js":52}],32:[function(require,module,exports){
 
 /**
  * Updates an array, either overwriting it with a new array, removing an entry
@@ -10233,7 +10290,7 @@ module.exports = function(vars) {
 
 }
 
-},{"../fetch/value.js":51}],42:[function(require,module,exports){
+},{"../fetch/value.js":52}],42:[function(require,module,exports){
 var fetchValue = require("../fetch/value.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Restricts data based on Solo/Mute filters
@@ -10346,7 +10403,7 @@ module.exports = function( vars , data ) {
 
 }
 
-},{"../fetch/value.js":51}],43:[function(require,module,exports){
+},{"../fetch/value.js":52}],43:[function(require,module,exports){
 var dataNest   = require("./nest.js"),
     fetchValue = require("../fetch/value.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -10552,7 +10609,41 @@ module.exports = function( vars ) {
 
 }
 
-},{"../fetch/value.js":51,"./nest.js":46}],44:[function(require,module,exports){
+},{"../fetch/value.js":52,"./nest.js":47}],44:[function(require,module,exports){
+var fetchValue;
+
+fetchValue = require("../fetch/value.js");
+
+module.exports = function(vars, data) {
+  var d, groupedData, strippedData, val, _i, _len;
+  groupedData = d3.nest();
+  vars.id.nesting.forEach(function(n, i) {
+    if (i < vars.depth.value) {
+      return groupedData.key(function(d) {
+        return fetchValue(vars, d.d3plus, n);
+      });
+    }
+  });
+  strippedData = [];
+  for (_i = 0, _len = data.length; _i < _len; _i++) {
+    d = data[_i];
+    val = vars.size.value ? fetchValue(vars, d, vars.size.value) : 1;
+    if (val && typeof val === "number" && val > 0) {
+      delete d.d3plus.r;
+      delete d.d3plus.x;
+      delete d.d3plus.y;
+      strippedData.push({
+        d3plus: d,
+        id: d[vars.id.value],
+        value: val
+      });
+    }
+  }
+  return groupedData.entries(strippedData);
+};
+
+
+},{"../fetch/value.js":52}],45:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Get Key Types from Data
 //------------------------------------------------------------------------------
@@ -10596,7 +10687,7 @@ module.exports = function( vars , type ) {
 
 }
 
-},{}],45:[function(require,module,exports){
+},{}],46:[function(require,module,exports){
 
 /**
  * Load Data using JSON
@@ -10688,7 +10779,7 @@ module.exports = function(vars, key, next) {
 };
 
 
-},{}],46:[function(require,module,exports){
+},{}],47:[function(require,module,exports){
 var fetchValue = require("../fetch/value.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Nests and groups the data.
@@ -11002,7 +11093,7 @@ var dataNest = function( vars , flatData , nestingLevels , requirements ) {
 
 module.exports = dataNest
 
-},{"../fetch/value.js":51}],47:[function(require,module,exports){
+},{"../fetch/value.js":52}],48:[function(require,module,exports){
 var dataNest   = require("./nest.js"),
     fetchValue = require("../fetch/value.js"),
     fetchColor = require("../fetch/color.js"),
@@ -11189,7 +11280,7 @@ module.exports = function( vars , rawData , split ) {
 
 }
 
-},{"../fetch/color.js":48,"../fetch/text.js":50,"../fetch/value.js":51,"./nest.js":46}],48:[function(require,module,exports){
+},{"../fetch/color.js":49,"../fetch/text.js":51,"../fetch/value.js":52,"./nest.js":47}],49:[function(require,module,exports){
 var fetchValue = require("./value.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Finds an object's color and returns random if it cannot be found
@@ -11198,6 +11289,10 @@ module.exports = function( vars , id , level ) {
 
   if ( !level ) {
     var level = vars.id.value
+  }
+
+  if (typeof level === "number") {
+    level = vars.id.nesting[level]
   }
 
   function getRandom( c ) {
@@ -11221,33 +11316,48 @@ module.exports = function( vars , id , level ) {
   }
   else {
 
+    function getColor(color) {
+
+      if ( !color ) {
+
+        if ( vars.color.value && typeof vars.color.valueScale === "function" ) {
+          return vars.color.valueScale(0)
+        }
+        return getRandom( id )
+
+      }
+      else if ( !vars.color.valueScale ) {
+        return d3plus.color.validate( color ) ? color : getRandom( color )
+      }
+      else {
+        return vars.color.valueScale( color )
+      }
+
+    }
+
+    var colors = []
     for ( var i = vars.id.nesting.indexOf(level) ; i >= 0 ; i-- ) {
       var colorLevel = vars.id.nesting[i]
-        , o = d3plus.object.validate(id) && !(vars.color.value in id) && id[level] instanceof Array ? id[level][0] : fetchValue(vars, id, colorLevel)
-        , color = fetchValue( vars , o , vars.color.value , colorLevel )
-      if ( color ) break
-    }
-
-    if ( !color ) {
-
-      if ( vars.color.value || typeof vars.color.valueScale === "function" ) {
-        return vars.color.missing
+      if (d3plus.object.validate(id)) {
+        var o = !(colorLevel in id) ? fetchValue(vars,id,colorLevel) : id
+          , value = fetchValue( vars , o , vars.color.value , colorLevel )
       }
-      return getRandom( id )
+      else {
+        var value = id
+      }
+      if ( value ) {
+        var color = getColor(value)
+        if (colors.indexOf(color) < 0) colors.push(color)
+      }
+    }
 
-    }
-    else if ( !vars.color.valueScale ) {
-      return d3plus.color.validate( color ) ? color : getRandom( color )
-    }
-    else {
-      return vars.color.valueScale( color )
-    }
+    return colors.length === 0 ? getColor(undefined) : colors.length === 1 ? colors[0] : vars.color.missing
 
   }
 
 }
 
-},{"./value.js":51}],49:[function(require,module,exports){
+},{"./value.js":52}],50:[function(require,module,exports){
 var dataFilter = require("../data/filter.js"),
     dataNest = require("../data/nest.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -11444,7 +11554,7 @@ module.exports = function( vars , years ) {
 
 }
 
-},{"../data/filter.js":42,"../data/nest.js":46}],50:[function(require,module,exports){
+},{"../data/filter.js":42,"../data/nest.js":47}],51:[function(require,module,exports){
 var fetchValue = require("./value.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Get array of available text values
@@ -11522,7 +11632,7 @@ module.exports = function(vars,obj,depth) {
 
 }
 
-},{"./value.js":51}],51:[function(require,module,exports){
+},{"./value.js":52}],52:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Finds a given variable by searching through the data and attrs
 //------------------------------------------------------------------------------
@@ -11530,6 +11640,9 @@ module.exports = function( vars , id , variable , id_var , agg ) {
 
   if ( variable && typeof variable === "function" ) {
     return variable( id )
+  }
+  else if ( variable && typeof variable === "number" ) {
+    return variable
   }
   else if ( !variable ) {
     return null
@@ -11649,7 +11762,7 @@ module.exports = function( vars , id , variable , id_var , agg ) {
 
 }
 
-},{}],52:[function(require,module,exports){
+},{}],53:[function(require,module,exports){
 
 /**
  * Creates an invisible test element to populate
@@ -11672,7 +11785,7 @@ module.exports = function(type) {
 };
 
 
-},{}],53:[function(require,module,exports){
+},{}],54:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Resets certain keys in global variables.
 //-------------------------------------------------------------------
@@ -11702,7 +11815,7 @@ var reset = function( obj , method ) {
 
 module.exports = reset
 
-},{}],54:[function(require,module,exports){
+},{}],55:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Cleans edges list and populates nodes list if needed
 //-------------------------------------------------------------------
@@ -11779,7 +11892,7 @@ module.exports = function( vars ) {
 
 }
 
-},{}],55:[function(require,module,exports){
+},{}],56:[function(require,module,exports){
 // Parses an HTML element for data
 module.exports = function( vars ) {
 
@@ -11936,7 +12049,7 @@ module.exports = function( vars ) {
 
 }
 
-},{}],56:[function(require,module,exports){
+},{}],57:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Calculates node positions, if needed for network
 //-------------------------------------------------------------------
@@ -11961,6 +12074,18 @@ module.exports = function(vars) {
       .nodes(vars.nodes.value)
       .links(vars.edges.value)
 
+    var strength = vars.edges.strength.value
+    if (strength) {
+      if (typeof strength === "string") {
+        force.linkStrength(function(e){
+          return e[strength]
+        })
+      }
+      else {
+        force.linkStrength(strength)
+      }
+    }
+
     var iterations = 50,
         threshold = 0.01;
 
@@ -11981,7 +12106,7 @@ module.exports = function(vars) {
 
 }
 
-},{}],57:[function(require,module,exports){
+},{}],58:[function(require,module,exports){
 var numeric;
 
 numeric = require('numeric');
@@ -12058,7 +12183,7 @@ d3plus.data.bestRegress = function(data, options) {
 };
 
 
-},{"numeric":3}],58:[function(require,module,exports){
+},{"numeric":7}],59:[function(require,module,exports){
 var kdtree;
 
 kdtree = require('static-kdtree');
@@ -12140,7 +12265,7 @@ d3plus.data.lof = function(points, K) {
 };
 
 
-},{"static-kdtree":5}],59:[function(require,module,exports){
+},{"static-kdtree":9}],60:[function(require,module,exports){
 d3plus.data.mad = function(points) {
   var mad, median, result;
   median = d3.median(points);
@@ -12157,7 +12282,7 @@ d3plus.data.mad = function(points) {
 };
 
 
-},{}],60:[function(require,module,exports){
+},{}],61:[function(require,module,exports){
 
 /**
  * Detects if the Font-Awesome library is loaded on the page.
@@ -12169,7 +12294,7 @@ stylesheet = require("../style/sheet.coffee");
 d3plus.font.awesome = stylesheet("font-awesome");
 
 
-},{"../style/sheet.coffee":198}],61:[function(require,module,exports){
+},{"../style/sheet.coffee":199}],62:[function(require,module,exports){
 var fontTester;
 
 fontTester = require("../core/font/tester.coffee");
@@ -12207,7 +12332,7 @@ d3plus.font.sizes = function(words, style, parent) {
 };
 
 
-},{"../core/font/tester.coffee":52}],62:[function(require,module,exports){
+},{"../core/font/tester.coffee":53}],63:[function(require,module,exports){
 var fontTester = require("../core/font/tester.coffee")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Given a single font or a list of font, determines which can be rendered
@@ -12287,7 +12412,7 @@ d3plus.font.validate = function(test_fonts) {
 
 d3plus.font.validate.complete = {}
 
-},{"../core/font/tester.coffee":52}],63:[function(require,module,exports){
+},{"../core/font/tester.coffee":53}],64:[function(require,module,exports){
 var dataFormat = require("../core/data/format.js"),
     dataKeys = require("../core/data/keys.js"),
     dataLoad = require("../core/data/load.coffee"),
@@ -12624,7 +12749,7 @@ d3plus.form = function() {
 
 }
 
-},{"../core/data/format.js":43,"../core/data/keys.js":44,"../core/data/load.coffee":45,"../core/fetch/data.js":49,"../core/method/reset.js":53,"./types/auto.js":64,"./types/button/button.js":65,"./types/drop/drop.js":70,"./types/toggle.js":87}],64:[function(require,module,exports){
+},{"../core/data/format.js":43,"../core/data/keys.js":45,"../core/data/load.coffee":46,"../core/fetch/data.js":50,"../core/method/reset.js":54,"./types/auto.js":65,"./types/button/button.js":66,"./types/drop/drop.js":71,"./types/toggle.js":88}],65:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Determines form type based on data length.
 //------------------------------------------------------------------------------
@@ -12644,7 +12769,7 @@ module.exports = function( vars ) {
 
 }
 
-},{}],65:[function(require,module,exports){
+},{}],66:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates a Button
 //------------------------------------------------------------------------------
@@ -12727,7 +12852,7 @@ module.exports = function( vars ) {
 
 }
 
-},{"./functions/color.js":66,"./functions/icons.js":67,"./functions/mouseevents.js":68,"./functions/style.js":69}],66:[function(require,module,exports){
+},{"./functions/color.js":67,"./functions/icons.js":68,"./functions/mouseevents.js":69,"./functions/style.js":70}],67:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Defines button color
 //------------------------------------------------------------------------------
@@ -12788,7 +12913,7 @@ module.exports = function ( elem , vars ) {
 
 }
 
-},{}],67:[function(require,module,exports){
+},{}],68:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 //
 //------------------------------------------------------------------------------
@@ -12968,7 +13093,7 @@ module.exports = function ( elem , vars ) {
 
 }
 
-},{}],68:[function(require,module,exports){
+},{}],69:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 //
 //------------------------------------------------------------------------------
@@ -13020,7 +13145,7 @@ module.exports = function ( elem , vars , color ) {
 
 }
 
-},{}],69:[function(require,module,exports){
+},{}],70:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 //
 //------------------------------------------------------------------------------
@@ -13039,7 +13164,7 @@ module.exports = function ( elem , vars ) {
 
 }
 
-},{}],70:[function(require,module,exports){
+},{}],71:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates Dropdown Menu
 //------------------------------------------------------------------------------
@@ -13117,7 +13242,7 @@ module.exports = function( vars ) {
 
 }
 
-},{"./functions/button.js":73,"./functions/data.js":74,"./functions/element.js":75,"./functions/keyboard.js":78,"./functions/list.js":79,"./functions/search.js":81,"./functions/selector.js":82,"./functions/title.js":83,"./functions/update.js":84,"./functions/width.js":85,"./functions/window.js":86}],71:[function(require,module,exports){
+},{"./functions/button.js":74,"./functions/data.js":75,"./functions/element.js":76,"./functions/keyboard.js":79,"./functions/list.js":80,"./functions/search.js":82,"./functions/selector.js":83,"./functions/title.js":84,"./functions/update.js":85,"./functions/width.js":86,"./functions/window.js":87}],72:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Checks to see if a given variable is allowed to be selected.
 //------------------------------------------------------------------------------
@@ -13153,7 +13278,7 @@ module.exports = function ( vars , value , active ) {
 
 }
 
-},{}],72:[function(require,module,exports){
+},{}],73:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Toggles the state of the dropdown menu.
 //------------------------------------------------------------------------------
@@ -13183,7 +13308,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{}],73:[function(require,module,exports){
+},{}],74:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates and styles the main drop button.
 //------------------------------------------------------------------------------
@@ -13264,7 +13389,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{}],74:[function(require,module,exports){
+},{}],75:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates and populates the dropdown list of items.
 //------------------------------------------------------------------------------
@@ -13382,7 +13507,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{}],75:[function(require,module,exports){
+},{}],76:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Overrides keyboard behavior of the original input element.
 //------------------------------------------------------------------------------
@@ -13421,7 +13546,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{}],76:[function(require,module,exports){
+},{}],77:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Calculates the height and orientation of the dropdown list, based on
 // available screen space.
@@ -13448,7 +13573,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{}],77:[function(require,module,exports){
+},{}],78:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Populates item list based on filtered data.
 //------------------------------------------------------------------------------
@@ -13573,7 +13698,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{"./active.js":71}],78:[function(require,module,exports){
+},{"./active.js":72}],79:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Assigns behavior to the user's keyboard for navigation.
 //------------------------------------------------------------------------------
@@ -13683,7 +13808,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{}],79:[function(require,module,exports){
+},{}],80:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates and populates the dropdown list of items.
 //------------------------------------------------------------------------------
@@ -13704,7 +13829,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{}],80:[function(require,module,exports){
+},{}],81:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Calculates scroll position of list.
 //------------------------------------------------------------------------------
@@ -13808,7 +13933,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{}],81:[function(require,module,exports){
+},{}],82:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates and styles the search box, if enabled.
 //------------------------------------------------------------------------------
@@ -13899,7 +14024,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{"./data.js":74,"./items.js":77,"./update.js":84}],82:[function(require,module,exports){
+},{"./data.js":75,"./items.js":78,"./update.js":85}],83:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates and styles the div that holds the search box and item list.
 //------------------------------------------------------------------------------
@@ -13921,7 +14046,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{}],83:[function(require,module,exports){
+},{}],84:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates and styles the title and back button.
 //------------------------------------------------------------------------------
@@ -14067,7 +14192,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{}],84:[function(require,module,exports){
+},{}],85:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Redraws only the drop down list.
 //------------------------------------------------------------------------------
@@ -14231,7 +14356,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{"./arrow.js":72,"./height.js":76,"./items.js":77,"./scroll.js":80}],85:[function(require,module,exports){
+},{"./arrow.js":73,"./height.js":77,"./items.js":78,"./scroll.js":81}],86:[function(require,module,exports){
 var fontTester = require("../../../../core/font/tester.coffee")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // If no widths are defined, then this calculates the width needed to fit the
@@ -14322,7 +14447,7 @@ module.exports = function ( vars ) {
 
 }
 
-},{"../../../../core/font/tester.coffee":52}],86:[function(require,module,exports){
+},{"../../../../core/font/tester.coffee":53}],87:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Recursive function that applies a click event to all parent windows that
 // will close the dropdown if it is open.
@@ -14365,7 +14490,7 @@ var windowEvents = function ( vars , elem ) {
 
 module.exports = windowEvents
 
-},{}],87:[function(require,module,exports){
+},{}],88:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates a set of Toggle Buttons
 //------------------------------------------------------------------------------
@@ -14449,7 +14574,7 @@ module.exports = function( vars ) {
 
 }
 
-},{}],88:[function(require,module,exports){
+},{}],89:[function(require,module,exports){
 var wiki;
 
 wiki = require("./wiki.coffee");
@@ -14507,7 +14632,7 @@ d3plus.console.stack = function() {
       stack = stack.filter(function(e) {
         return e.indexOf("Error") !== 0 && e.indexOf("d3plus.js:") < 0 && e.indexOf("d3plus.min.js:") < 0;
       });
-      if (stack.length) {
+      if (stack.length && stack[0].length) {
         splitter = (window.chrome ? "at " : "@");
         url = stack[0].split(splitter)[1];
         stack = url.split(":");
@@ -14555,7 +14680,7 @@ d3plus.console.wiki = function(url) {
 module.exports = d3plus.console;
 
 
-},{"./wiki.coffee":94}],89:[function(require,module,exports){
+},{"./wiki.coffee":95}],90:[function(require,module,exports){
 
 /**
  * Creates custom mouse events based on IE and Touch Devices.
@@ -14583,13 +14708,13 @@ if (d3plus.touch) {
 }
 
 
-},{}],90:[function(require,module,exports){
+},{}],91:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Determines if the current browser is Internet Explorer.
 //------------------------------------------------------------------------------
 d3plus.ie = /*@cc_on!@*/false
 
-},{}],91:[function(require,module,exports){
+},{}],92:[function(require,module,exports){
 
 /**
  * Calculates the correct CSS vendor prefix based on the current browser.
@@ -14614,13 +14739,13 @@ d3plus.prefix = function() {
 };
 
 
-},{}],92:[function(require,module,exports){
+},{}],93:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Detects right-to-left text direction on the page.
 //------------------------------------------------------------------------------
 d3plus.rtl = d3.select("html").attr("dir") == "rtl"
 
-},{}],93:[function(require,module,exports){
+},{}],94:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Detects scrollbar width for current browser.
 //------------------------------------------------------------------------------
@@ -14658,7 +14783,7 @@ d3plus.scrollbar = function() {
 
 }
 
-},{}],94:[function(require,module,exports){
+},{}],95:[function(require,module,exports){
 d3plus.wiki = {
   active: "Segmenting-Data#active",
   aggs: "Custom-Aggregations",
@@ -14721,7 +14846,7 @@ d3plus.wiki = {
 module.exports = d3plus.wiki;
 
 
-},{}],95:[function(require,module,exports){
+},{}],96:[function(require,module,exports){
 var intersectPoints, lineIntersection, pointInPoly, pointInSegmentBox, polyInsidePoly, rayIntersectsSegment, rotatePoint, rotatePoly, segmentsIntersect, simplify, squaredDist;
 
 simplify = require('simplify-js');
@@ -15132,14 +15257,14 @@ intersectPoints = function(poly, origin, alpha) {
 };
 
 
-},{"simplify-js":4}],96:[function(require,module,exports){
+},{"simplify-js":8}],97:[function(require,module,exports){
 var d3plus, message, stylesheet;
 
 d3plus = window.d3plus || {};
 
 window.d3plus = d3plus;
 
-d3plus.version = "1.5.0 - Aqua";
+d3plus.version = "1.5.1 - Aqua";
 
 d3plus.repo = "https://github.com/alexandersimoes/d3plus/";
 
@@ -15188,7 +15313,7 @@ if (stylesheet("d3plus.css")) {
 }
 
 
-},{"./general/console.coffee":88,"./style/sheet.coffee":198}],97:[function(require,module,exports){
+},{"./general/console.coffee":89,"./style/sheet.coffee":199}],98:[function(require,module,exports){
 d3plus.locale.en_US = {
 
   "dev"          : {
@@ -15355,7 +15480,7 @@ d3plus.locale.en_US = {
 
 }
 
-},{}],98:[function(require,module,exports){
+},{}],99:[function(require,module,exports){
 d3plus.locale.mk_MK = {
     "dev": {
         "accepted": "{0} не е прифатенa вредноста за {1}, ве молиме користете еднa од следниве вредности: {2}.",
@@ -15482,7 +15607,7 @@ d3plus.locale.mk_MK = {
     ]
 }
 
-},{}],99:[function(require,module,exports){
+},{}],100:[function(require,module,exports){
 d3plus.locale.pt_BR = {
     "dev": {
         "accepted": "{0} não é um valor aceito para {1}, por favor, use um dos seguintes procedimentos: {2}.",
@@ -15608,7 +15733,7 @@ d3plus.locale.pt_BR = {
     ]
 }
 
-},{}],100:[function(require,module,exports){
+},{}],101:[function(require,module,exports){
 d3plus.locale.zh_CN = {
     "dev": {
         "accepted": "{0}不是{1}的可接受值, 请用下列之一的值:{2}",
@@ -15737,7 +15862,7 @@ d3plus.locale.zh_CN = {
     ]
 }
 
-},{}],101:[function(require,module,exports){
+},{}],102:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Create dummy methods to catch deprecates
 //--------------------------------------------------------------------------
@@ -15773,7 +15898,7 @@ d3plus.method.axis = function( axis ) {
 
 }
 
-},{}],102:[function(require,module,exports){
+},{}],103:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Create dummy methods to catch deprecates
 //--------------------------------------------------------------------------
@@ -15790,7 +15915,7 @@ d3plus.method.filter = function( global ) {
 
 }
 
-},{}],103:[function(require,module,exports){
+},{}],104:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Get/set function for methods
 //------------------------------------------------------------------------------
@@ -15904,7 +16029,7 @@ d3plus.method.function = function( key , vars ) {
 
 }
 
-},{}],104:[function(require,module,exports){
+},{}],105:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Create dummy methods to catch deprecates
 //------------------------------------------------------------------------------
@@ -15977,53 +16102,31 @@ d3plus.method.init = function( vars , obj , method ) {
 
 }
 
-},{}],105:[function(require,module,exports){
-//^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-// Detects is we should set the object or check all keys of object.
-//------------------------------------------------------------------------------
-d3plus.method.object = function( vars , method , object , key , value ) {
-
-  if ([ "accepted" , "getVars" ].indexOf(key) < 0) {
-
-    //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    // Determine whether or not to just set the local variable or to dig into
-    // the object passed looking for keys.
-    //--------------------------------------------------------------------------
-    var passingObject  = d3plus.object.validate(value)
-      , approvedObject = passingObject && ( !("value" in value) &&
-                         !(d3.keys(value)[0] in object[key]) )
-
-    //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    // Set value of key.
-    //--------------------------------------------------------------------------
-    if ( value === null || !passingObject || approvedObject ) {
-
-      if ( approvedObject ) {
-        d3plus.method.set( vars , method , object[key] , "value" , value )
-      }
-      else {
-        d3plus.method.set( vars , method , object , key , value )
-      }
-
-    }
-    //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-    // If it's an object, dig through it and set inner values.
-    //--------------------------------------------------------------------------
-    else if ( passingObject ) {
-
-      for (d in value) {
-
-        d3plus.method.object( vars , method , object[key] , d , value[d] )
-
-      }
-
-    }
-
-  }
-
-}
-
 },{}],106:[function(require,module,exports){
+d3plus.method.object = function(vars, method, object, key, value) {
+  var approvedObject, d, objectOnly, passingObject, _results;
+  if (["accepted", "getVars"].indexOf(key) < 0) {
+    passingObject = d3plus.object.validate(value);
+    objectOnly = d3plus.object.validate(object[key]) && "objectAccess" in object[key] && object[key]["objectAccess"] === false;
+    approvedObject = passingObject && (objectOnly || ((!("value" in value)) && (!(d3.keys(value)[0] in object[key]))));
+    if (value === null || !passingObject || approvedObject) {
+      if (approvedObject) {
+        return d3plus.method.set(vars, method, object[key], "value", value);
+      } else {
+        return d3plus.method.set(vars, method, object, key, value);
+      }
+    } else if (passingObject) {
+      _results = [];
+      for (d in value) {
+        _results.push(d3plus.method.object(vars, method, object[key], d, value[d]));
+      }
+      return _results;
+    }
+  }
+};
+
+
+},{}],107:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Process object's value
 //--------------------------------------------------------------------------
@@ -16044,7 +16147,7 @@ d3plus.method.process = function( object , value ) {
 
 }
 
-},{}],107:[function(require,module,exports){
+},{}],108:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Function to process data by url or element.
 //--------------------------------------------------------------------------
@@ -16091,7 +16194,7 @@ d3plus.method.processData = function ( value , self ) {
 
 }
 
-},{}],108:[function(require,module,exports){
+},{}],109:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Sets a method's value.
 //------------------------------------------------------------------------------
@@ -16437,7 +16540,7 @@ d3plus.method.set = function( vars , method , object , key , value ) {
 
 }
 
-},{}],109:[function(require,module,exports){
+},{}],110:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Global method shell.
 //------------------------------------------------------------------------------
@@ -16502,7 +16605,7 @@ d3plus.method = function( vars , methods , styles ) {
 
 }
 
-},{}],110:[function(require,module,exports){
+},{}],111:[function(require,module,exports){
 d3plus.method.active = {
   "accepted"   : [ false , Array , Function , Number , Object , String ],
   "deprecates" : "active_var",
@@ -16516,14 +16619,15 @@ d3plus.method.active = {
   "value"      : false
 }
 
-},{}],111:[function(require,module,exports){
+},{}],112:[function(require,module,exports){
 d3plus.method.aggs = {
   "accepted"   : [ Object ],
   "deprecated" : "nesting_aggs",
+  "objectAccess": false,
   "value"      : {}
 }
 
-},{}],112:[function(require,module,exports){
+},{}],113:[function(require,module,exports){
 d3plus.method.alt = {
   "accepted" : [ false , Array , Function , Object , String ],
   "mute"     : d3plus.method.filter(true),
@@ -16531,7 +16635,7 @@ d3plus.method.alt = {
   "value"    : "alt"
 }
 
-},{}],113:[function(require,module,exports){
+},{}],114:[function(require,module,exports){
 d3plus.method.attrs = {
   "accepted" : [ false , Array , Object , String ],
   "delimiter" : {
@@ -16547,7 +16651,7 @@ d3plus.method.attrs = {
   "value"    : false
 }
 
-},{}],114:[function(require,module,exports){
+},{}],115:[function(require,module,exports){
 d3plus.method.axes = {
   "mirror" : {
     "accepted"   : [ Boolean ],
@@ -16557,7 +16661,7 @@ d3plus.method.axes = {
   "values" : [ "x" , "y" ]
 }
 
-},{}],115:[function(require,module,exports){
+},{}],116:[function(require,module,exports){
 d3plus.method.color = {
   "accepted"   : [ false , Array , Function , Object , String ],
   "deprecates" : "color_var",
@@ -16575,7 +16679,7 @@ d3plus.method.color = {
   "solo"      : d3plus.method.filter(true)
 }
 
-},{}],116:[function(require,module,exports){
+},{}],117:[function(require,module,exports){
 d3plus.method.container = {
   "accepted" : [ Array , Object , String ],
   "element"  : false,
@@ -16600,7 +16704,7 @@ d3plus.method.container = {
   "value"    : false
 }
 
-},{}],117:[function(require,module,exports){
+},{}],118:[function(require,module,exports){
 d3plus.method.coords = {
   "accepted" : [ false , Array , Function , Object , String ],
   "filetype" : {
@@ -16613,7 +16717,7 @@ d3plus.method.coords = {
   "value"    : false
 }
 
-},{}],118:[function(require,module,exports){
+},{}],119:[function(require,module,exports){
 var fetchValue = require("../../core/fetch/value.js")
 
 d3plus.method.csv = {
@@ -16694,7 +16798,7 @@ d3plus.method.csv = {
   "value"     : undefined
 }
 
-},{"../../core/fetch/value.js":51}],119:[function(require,module,exports){
+},{"../../core/fetch/value.js":52}],120:[function(require,module,exports){
 d3plus.method.data = {
   "accepted" : [ false , Array , Function , String ],
   "cache"    : {},
@@ -16760,25 +16864,25 @@ d3plus.method.data = {
   "value"    : false
 }
 
-},{}],120:[function(require,module,exports){
+},{}],121:[function(require,module,exports){
 d3plus.method.depth = {
   "accepted" : [ Function , Number ],
   "value"    : 0
 }
 
-},{}],121:[function(require,module,exports){
+},{}],122:[function(require,module,exports){
 d3plus.method.descs = {
   "accepted" : [ false , Function , Object ],
   "value"    : false
 }
 
-},{}],122:[function(require,module,exports){
+},{}],123:[function(require,module,exports){
 d3plus.method.dev = {
   "accepted" : [ Boolean ],
   "value"    : false
 }
 
-},{}],123:[function(require,module,exports){
+},{}],124:[function(require,module,exports){
 var parseElement = require("../../core/parse/element.js")
 d3plus.method.draw = {
   "accepted" : [ undefined , Function ],
@@ -16850,7 +16954,7 @@ d3plus.method.draw = {
   "value"    : undefined
 }
 
-},{"../../core/parse/element.js":55}],124:[function(require,module,exports){
+},{"../../core/parse/element.js":56}],125:[function(require,module,exports){
 d3plus.method.edges = {
   "accepted"    : [ false , Array , Function , String ],
   "connections" : function(focus,id,objects) {
@@ -16915,17 +17019,21 @@ d3plus.method.edges = {
   "process"     : d3plus.method.processData,
   "size"        : false,
   "source"      : "source",
+  "strength"    : {
+    "accepted" : [false, Function, Number, String],
+    "value"    : false
+  },
   "target"      : "target",
   "value"       : false
 }
 
-},{}],125:[function(require,module,exports){
+},{}],126:[function(require,module,exports){
 d3plus.method.error = {
   "accepted" : [ Boolean , String ],
   "value"    : false
 }
 
-},{}],126:[function(require,module,exports){
+},{}],127:[function(require,module,exports){
 d3plus.method.focus = {
   "accepted"   : [ false , Array , Function , Number , String ],
   "deprecates" : "highlight",
@@ -16986,14 +17094,14 @@ d3plus.method.focus = {
   "value"      : []
 }
 
-},{}],127:[function(require,module,exports){
+},{}],128:[function(require,module,exports){
 d3plus.method.footer = {
   "accepted" : [ false , Number , String ],
   "link"     : false,
   "value"    : false
 }
 
-},{}],128:[function(require,module,exports){
+},{}],129:[function(require,module,exports){
 d3plus.method.format = {
   "accepted"   : [ Function , String ],
   "deprecates" : [ "number_format" , "text_format" ],
@@ -17064,14 +17172,14 @@ d3plus.method.format = {
   }
 }
 
-},{}],129:[function(require,module,exports){
+},{}],130:[function(require,module,exports){
 d3plus.method.height = {
   "accepted"  : [ false , Number ],
   "secondary" : false,
   "value"     : false
 }
 
-},{}],130:[function(require,module,exports){
+},{}],131:[function(require,module,exports){
 d3plus.method.history = {
   "accepted" : [ Boolean ],
   "back"     : function() {
@@ -17090,13 +17198,13 @@ d3plus.method.history = {
   "value"    : true
 }
 
-},{}],131:[function(require,module,exports){
+},{}],132:[function(require,module,exports){
 d3plus.method.hover = {
   "accepted" : [ false , Number , String ],
   "value"    : false
 }
 
-},{}],132:[function(require,module,exports){
+},{}],133:[function(require,module,exports){
 d3plus.method.icon = {
   "accepted"   : [ false , Array , Function , Object , String ],
   "deprecates" : "icon_var",
@@ -17108,7 +17216,7 @@ d3plus.method.icon = {
   "value"      : "icon"
 }
 
-},{}],133:[function(require,module,exports){
+},{}],134:[function(require,module,exports){
 d3plus.method.id = {
   "accepted"    : [ Array , String ],
   "dataFilter"  : true,
@@ -17129,7 +17237,7 @@ d3plus.method.id = {
   "solo"        : d3plus.method.filter(true)
 }
 
-},{}],134:[function(require,module,exports){
+},{}],135:[function(require,module,exports){
 d3plus.method.keywords = {
   "accepted" : [ false , Array , Function , Object , String ],
   "mute"     : d3plus.method.filter(true),
@@ -17137,7 +17245,7 @@ d3plus.method.keywords = {
   "value"    : "keywords"
 }
 
-},{}],135:[function(require,module,exports){
+},{}],136:[function(require,module,exports){
 d3plus.method.labels = {
   "accepted" : [ Boolean ] ,
   "resize"   : {
@@ -17147,13 +17255,13 @@ d3plus.method.labels = {
   "value"    : true
 }
 
-},{}],136:[function(require,module,exports){
+},{}],137:[function(require,module,exports){
 d3plus.method.legend = {
   "accepted" : [ Boolean ],
   "value"    : true
 }
 
-},{}],137:[function(require,module,exports){
+},{}],138:[function(require,module,exports){
 d3plus.method.margin = {
   "accepted" : [ Number , Object , String ],
   "process"  : function ( value ) {
@@ -17242,13 +17350,13 @@ d3plus.method.margin = {
   "value"    : 0
 }
 
-},{}],138:[function(require,module,exports){
+},{}],139:[function(require,module,exports){
 d3plus.method.messages = {
   "accepted" : [ Boolean , String ],
   "value"    : true
 }
 
-},{}],139:[function(require,module,exports){
+},{}],140:[function(require,module,exports){
 d3plus.method.nodes = {
   "accepted" : [ false , Array , Function , String ],
   "delimiter" : {
@@ -17264,7 +17372,7 @@ d3plus.method.nodes = {
   "value"    : false
 }
 
-},{}],140:[function(require,module,exports){
+},{}],141:[function(require,module,exports){
 d3plus.method.open = {
   "accepted" : [ Boolean ],
   "flipped"  : {
@@ -17274,7 +17382,7 @@ d3plus.method.open = {
   "value"    : false
 }
 
-},{}],141:[function(require,module,exports){
+},{}],142:[function(require,module,exports){
 d3plus.method.order = {
   "accepted" : [ false , Function , String ],
   "sort"     : {
@@ -17285,7 +17393,7 @@ d3plus.method.order = {
   "value"    : false
 }
 
-},{}],142:[function(require,module,exports){
+},{}],143:[function(require,module,exports){
 d3plus.method.remove = {
   "accepted" : undefined,
   "process"  : function ( value ) {
@@ -17303,13 +17411,13 @@ d3plus.method.remove = {
   "value"    : undefined
 }
 
-},{}],143:[function(require,module,exports){
+},{}],144:[function(require,module,exports){
 d3plus.method.resize = {
   "accepted" : [ Boolean ],
   "value"    : false
 }
 
-},{}],144:[function(require,module,exports){
+},{}],145:[function(require,module,exports){
 d3plus.method.search = {
   "accepted" : [ "auto" , Boolean ],
   "process"  : function(value) {
@@ -17324,7 +17432,7 @@ d3plus.method.search = {
   "value"    : "auto"
 }
 
-},{}],145:[function(require,module,exports){
+},{}],146:[function(require,module,exports){
 d3plus.method.select = {
   "accepted"  : [ String ],
   "chainable" : false,
@@ -17340,7 +17448,7 @@ d3plus.method.select = {
   "value"     : undefined
 }
 
-},{}],146:[function(require,module,exports){
+},{}],147:[function(require,module,exports){
 d3plus.method.selectAll = {
   "accepted"  : [ String ],
   "chainable" : false,
@@ -17356,7 +17464,7 @@ d3plus.method.selectAll = {
   "value"     : undefined
 }
 
-},{}],147:[function(require,module,exports){
+},{}],148:[function(require,module,exports){
 d3plus.method.shape = {
   "accepted" : function( vars ) {
     return vars.shell === "textwrap" ? [ "circle" , "square" ]
@@ -17366,7 +17474,7 @@ d3plus.method.shape = {
   "value"    : false
 }
 
-},{}],148:[function(require,module,exports){
+},{}],149:[function(require,module,exports){
 d3plus.method.size = {
   "accepted"    : function( vars ) {
 
@@ -17374,7 +17482,7 @@ d3plus.method.size = {
       return [ Array , false ]
     }
     else {
-      return [ Array , Boolean , Function , Object , String ]
+      return [ Array , Boolean , Function , Number , Object , String ]
     }
 
   },
@@ -17391,7 +17499,7 @@ d3plus.method.size = {
   "value"       : false
 }
 
-},{}],149:[function(require,module,exports){
+},{}],150:[function(require,module,exports){
 d3plus.method.style = {
   "accepted" : function( vars ){
     return d3.keys(d3plus.style).filter(function(s){
@@ -17401,7 +17509,7 @@ d3plus.method.style = {
   "value"    : "default"
 }
 
-},{}],150:[function(require,module,exports){
+},{}],151:[function(require,module,exports){
 d3plus.method.temp = {
   "accepted": [ false , Array , Function , Object , String ],
   "deprecates": [ "else_var" , "else" ],
@@ -17410,7 +17518,7 @@ d3plus.method.temp = {
   "value": false
 }
 
-},{}],151:[function(require,module,exports){
+},{}],152:[function(require,module,exports){
 d3plus.method.text = {
   "accepted"   : [ Array , Boolean , Function , Object , String ],
   "deprecates" : [ "name_array" , "text_var" ],
@@ -17439,7 +17547,7 @@ d3plus.method.text = {
   "split"      : [ "-" , "/" , ";" , ":" , "&" ]
 }
 
-},{}],152:[function(require,module,exports){
+},{}],153:[function(require,module,exports){
 d3plus.method.time = {
   "accepted"    : [ Array , Boolean , Function , Object , String ],
   "dataFilter"  : true,
@@ -17458,13 +17566,13 @@ d3plus.method.time = {
   "value"       : false
 }
 
-},{}],153:[function(require,module,exports){
+},{}],154:[function(require,module,exports){
 d3plus.method.timeline = {
   "accepted" : [ Boolean ],
   "value"    : true
 }
 
-},{}],154:[function(require,module,exports){
+},{}],155:[function(require,module,exports){
 d3plus.method.title = {
   "accepted" : [ false , Function , String ],
   "link"     : false,
@@ -17495,7 +17603,7 @@ d3plus.method.title = {
   "value"    : false
 }
 
-},{}],155:[function(require,module,exports){
+},{}],156:[function(require,module,exports){
 d3plus.method.tooltip = {
   "accepted"   : [ false , Array , Function , Object , String ],
   "deprecates" : "tooltip_info",
@@ -17507,7 +17615,7 @@ d3plus.method.tooltip = {
   "value"      : false
 }
 
-},{}],156:[function(require,module,exports){
+},{}],157:[function(require,module,exports){
 d3plus.method.total = {
   "accepted": [ false , Array , Function , Object , String ],
   "deprecates": [ "total_var" ],
@@ -17516,7 +17624,7 @@ d3plus.method.total = {
   "value": false
 }
 
-},{}],157:[function(require,module,exports){
+},{}],158:[function(require,module,exports){
 d3plus.method.type = {
   "accepted" : function( vars ) {
     return d3.keys(vars.types)
@@ -17544,26 +17652,26 @@ d3plus.method.type = {
   }
 }
 
-},{}],158:[function(require,module,exports){
+},{}],159:[function(require,module,exports){
 d3plus.method.ui = {
   "accepted" : [ Array , Boolean ],
   "value"    : false
 }
 
-},{}],159:[function(require,module,exports){
+},{}],160:[function(require,module,exports){
 d3plus.method.width = {
   "accepted"  : [ false , Number ],
   "secondary" : false,
   "value"     : false
 }
 
-},{}],160:[function(require,module,exports){
+},{}],161:[function(require,module,exports){
 d3plus.method.x = d3plus.method.axis("x")
 
-},{}],161:[function(require,module,exports){
+},{}],162:[function(require,module,exports){
 d3plus.method.y = d3plus.method.axis("y")
 
-},{}],162:[function(require,module,exports){
+},{}],163:[function(require,module,exports){
 d3plus.method.zoom = {
   "accepted"   : [ Boolean ],
   "behavior"   : d3.behavior.zoom().scaleExtent([ 1 , 1 ]),
@@ -17618,7 +17726,7 @@ d3plus.method.zoom = {
   "value"      : true
 }
 
-},{}],163:[function(require,module,exports){
+},{}],164:[function(require,module,exports){
 d3plus.network.cluster = function(edges, options) {
   var Q, a, b, cid, commSize, commSizes, communities, community, deltaQ, distance, edge, endpoint, events, id, iter, k, linksMap, m, maxa, maxb, node, nodeid, nodes, nodesMap, result, startpoint, _i, _j, _len, _len1, _ref, _ref1;
   events = [];
@@ -17751,7 +17859,7 @@ d3plus.network.cluster = function(edges, options) {
 };
 
 
-},{}],164:[function(require,module,exports){
+},{}],165:[function(require,module,exports){
 d3plus.network.normalize = function(edges, options) {
   var K, a, b, directed, distance, edge, edge2distance, endpoint, errormsg, i, id, id1, idA, idB, node, nodeA, nodeB, nodeid, nodes, source, startpoint, target, vdebug, _i, _j, _k, _len, _len1, _len2, _ref, _ref1;
   source = options.source, target = options.target, directed = options.directed, distance = options.distance, nodeid = options.nodeid, startpoint = options.startpoint, endpoint = options.endpoint, K = options.K, vdebug = options.vdebug;
@@ -17895,7 +18003,7 @@ d3plus.network.normalize = function(edges, options) {
 };
 
 
-},{}],165:[function(require,module,exports){
+},{}],166:[function(require,module,exports){
 var Heap;
 
 Heap = require('heap');
@@ -17992,7 +18100,7 @@ d3plus.network.shortestPath = function(edges, source, options) {
 module.exports = d3plus.network.shortestPath;
 
 
-},{"heap":1}],166:[function(require,module,exports){
+},{"heap":5}],167:[function(require,module,exports){
 d3plus.network.subgraph = function(edges, source, options) {
   var K, dfs, directed, distance, edge, endpoint, id, nodeid, nodes, startpoint, visited, _ref;
   if (options == null) {
@@ -18058,7 +18166,7 @@ d3plus.network.subgraph = function(edges, source, options) {
 };
 
 
-},{}],167:[function(require,module,exports){
+},{}],168:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Formats numbers to look "pretty"
 //------------------------------------------------------------------------------
@@ -18096,7 +18204,7 @@ d3plus.number.format = function( number , key , vars ) {
     time.push(vars.time.value)
   }
 
-  if (key && time.indexOf(key.toLowerCase()) >= 0) {
+  if (typeof key === "string" && time.indexOf(key.toLowerCase()) >= 0) {
     return number
   }
   else if (number < 10 && number > -10) {
@@ -18120,7 +18228,7 @@ d3plus.number.format = function( number , key , vars ) {
 
 }
 
-},{}],168:[function(require,module,exports){
+},{}],169:[function(require,module,exports){
 var d3selection;
 
 d3selection = require("../util/d3selection.js");
@@ -18166,7 +18274,7 @@ d3plus.object.merge = function(obj1, obj2) {
 module.exports = d3plus.object.merge;
 
 
-},{"../util/d3selection.js":218}],169:[function(require,module,exports){
+},{"../util/d3selection.js":219}],170:[function(require,module,exports){
 
 /**
  * Checks to see if the passed object has keys and is not an array.
@@ -18178,7 +18286,7 @@ d3plus.object.validate = function(obj) {
 module.exports = d3plus.object.validate;
 
 
-},{}],170:[function(require,module,exports){
+},{}],171:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Formats a string similar to Python's "format"
 //------------------------------------------------------------------------------
@@ -18209,7 +18317,7 @@ d3plus.string.format = function() {
 
 }
 
-},{}],171:[function(require,module,exports){
+},{}],172:[function(require,module,exports){
 
 /**
  * Converts an array of strings into a string list using commas and "and".
@@ -18243,7 +18351,7 @@ d3plus.string.list = function(list, andText, max, moreText) {
 };
 
 
-},{}],172:[function(require,module,exports){
+},{}],173:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Removes all non ASCII characters
 //------------------------------------------------------------------------------
@@ -18297,7 +18405,7 @@ d3plus.string.strip = function(str) {
 
 }
 
-},{}],173:[function(require,module,exports){
+},{}],174:[function(require,module,exports){
 
 /**
  * Formats numbers to look "pretty"
@@ -18333,7 +18441,7 @@ d3plus.string.title = function(text, key, vars) {
 };
 
 
-},{}],174:[function(require,module,exports){
+},{}],175:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // D3plus Default Color Scheme
 // Created by Dave Landry
@@ -18346,7 +18454,7 @@ d3plus.style.default.fontFamily = [ "Helvetica Neue"
                                   , "Arial"
                                   , "sans-serif" ]
 
-},{}],175:[function(require,module,exports){
+},{}],176:[function(require,module,exports){
 d3plus.style.default.axes = {
   "ticks" : {
     "color" : "#ccc",
@@ -18369,20 +18477,20 @@ d3plus.style.default.axes = {
   }
 }
 
-},{}],176:[function(require,module,exports){
+},{}],177:[function(require,module,exports){
 d3plus.style.default.background = {
   "accepted" : [ String ],
   "value"    : "#ffffff"
 }
 
-},{}],177:[function(require,module,exports){
+},{}],178:[function(require,module,exports){
 d3plus.style.default.color = {
-  "heatmap"   : [ "#27366c" , "#7b91d3" , "#9ed3e3"
-                , "#f3d261" , "#c9853a" , "#d74b03" ],
+  "heatmap"   : [ "#282F6B" , "#419391" , "#AFD5E8"
+                , "#EACE3F" , "#B35C1E" , "#B22200" ],
   "focus"     : "#444444",
   "missing"   : "#eeeeee",
   "primary"   : "#d74b03",
-  "range"     : [ "#d74b03" , "#eeeeee" , "#94b153" ],
+  "range"     : [ "#B22200" , "#FFEE8D" , "#759143" ],
   "scale"     : {
     "accepted": [ Array, "d3plus", "category10", "category20", "category20b", "category20c" ],
     "process": function(value) {
@@ -18406,7 +18514,7 @@ d3plus.style.default.color = {
   "secondary" : "#e5b3bb"
 }
 
-},{}],178:[function(require,module,exports){
+},{}],179:[function(require,module,exports){
 d3plus.style.default.coords = {
   "center"     : [ 0 , 0 ],
   "fit"        : {
@@ -18421,7 +18529,7 @@ d3plus.style.default.coords = {
   "threshold"  : 0.1
 }
 
-},{}],179:[function(require,module,exports){
+},{}],180:[function(require,module,exports){
 d3plus.style.default.data = {
   "donut"   : {
     "size" : 0.35
@@ -18433,7 +18541,7 @@ d3plus.style.default.data = {
   }
 }
 
-},{}],180:[function(require,module,exports){
+},{}],181:[function(require,module,exports){
 d3plus.style.default.edges = {
   "arrows"  : {
     "accepted"  : [ Boolean , Number ],
@@ -18450,7 +18558,7 @@ d3plus.style.default.edges = {
   "width"   : 1
 }
 
-},{}],181:[function(require,module,exports){
+},{}],182:[function(require,module,exports){
 d3plus.style.default.font = {
   "align"      : {
     "accepted" : [ "left" , "center" , "right" ],
@@ -18504,7 +18612,7 @@ d3plus.style.default.font = {
   "weight"     : 200
 }
 
-},{}],182:[function(require,module,exports){
+},{}],183:[function(require,module,exports){
 d3plus.style.default.footer = {
   "font"     : {
     "align"      : "center",
@@ -18525,13 +18633,13 @@ d3plus.style.default.footer = {
   "position" : "bottom"
 }
 
-},{}],183:[function(require,module,exports){
+},{}],184:[function(require,module,exports){
 d3plus.style.default.height = {
   "small" : 300,
   "max"   : 600
 }
 
-},{}],184:[function(require,module,exports){
+},{}],185:[function(require,module,exports){
 d3plus.style.default.icon = {
   "back"   : {
     "accepted" : [ false , String ],
@@ -18612,7 +18720,7 @@ d3plus.style.default.icon = {
   }
 }
 
-},{}],185:[function(require,module,exports){
+},{}],186:[function(require,module,exports){
 d3plus.style.default.labels = {
   "align"    : "middle",
   "font"     : {
@@ -18632,7 +18740,7 @@ d3plus.style.default.labels = {
   "segments" : 2
 }
 
-},{}],186:[function(require,module,exports){
+},{}],187:[function(require,module,exports){
 d3plus.style.default.legend = {
   "align"    : "middle",
   "font"     : {
@@ -18656,7 +18764,7 @@ d3plus.style.default.legend = {
   "size"     : [ 8 , 30 ]
 }
 
-},{}],187:[function(require,module,exports){
+},{}],188:[function(require,module,exports){
 d3plus.style.default.links = {
   "font"  : {
     "color"      : "#444444",
@@ -18686,7 +18794,7 @@ d3plus.style.default.links = {
   }
 }
 
-},{}],188:[function(require,module,exports){
+},{}],189:[function(require,module,exports){
 d3plus.style.default.messages = {
   "font" : {
     "color"      : "#444",
@@ -18705,12 +18813,12 @@ d3plus.style.default.messages = {
   "padding": 5
 }
 
-},{}],189:[function(require,module,exports){
+},{}],190:[function(require,module,exports){
 d3plus.style.default.nodes = {
   "overlap" : 0.6
 }
 
-},{}],190:[function(require,module,exports){
+},{}],191:[function(require,module,exports){
 d3plus.style.default.shape = {
   "interpolate" : {
     "accepted"   : [ "basis" , "basis-open" , "cardinal"
@@ -18725,7 +18833,7 @@ d3plus.style.default.shape = {
   }
 }
 
-},{}],191:[function(require,module,exports){
+},{}],192:[function(require,module,exports){
 d3plus.style.default.timeline = {
   "align"      : "middle",
   "hover": {
@@ -18748,14 +18856,14 @@ d3plus.style.default.timeline = {
   "tick"      : "#818181"
 }
 
-},{}],192:[function(require,module,exports){
+},{}],193:[function(require,module,exports){
 d3plus.style.default.timing = {
   "mouseevents" : 60,
   "transitions" : 600,
   "ui"          : 200
 }
 
-},{}],193:[function(require,module,exports){
+},{}],194:[function(require,module,exports){
 d3plus.style.default.title = {
   "font"     : {
     "align"      : "center",
@@ -18816,7 +18924,7 @@ d3plus.style.default.title = {
   "width"    : false
 }
 
-},{}],194:[function(require,module,exports){
+},{}],195:[function(require,module,exports){
 d3plus.style.default.tooltip = {
   "anchor"      : "top center",
   "background"  : "#ffffff",
@@ -18854,7 +18962,7 @@ d3plus.style.default.tooltip = {
   "small"      : 225
 }
 
-},{}],195:[function(require,module,exports){
+},{}],196:[function(require,module,exports){
 d3plus.style.default.ui = {
   "align"    : {
     "accepted" : [ "left" , "center" , "right" ],
@@ -18916,12 +19024,12 @@ d3plus.style.default.ui = {
   }
 }
 
-},{}],196:[function(require,module,exports){
+},{}],197:[function(require,module,exports){
 d3plus.style.default.width = {
   "small" : 400
 }
 
-},{}],197:[function(require,module,exports){
+},{}],198:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Constructs font family property using the validate function
 //------------------------------------------------------------------------------
@@ -18934,7 +19042,7 @@ d3plus.style.fontFamily = function( family ) {
 
 }
 
-},{}],198:[function(require,module,exports){
+},{}],199:[function(require,module,exports){
 d3plus.style.sheet = function(name) {
   var i, returnBoolean, sheet;
   i = 0;
@@ -18953,7 +19061,7 @@ d3plus.style.sheet = function(name) {
 module.exports = d3plus.style.sheet;
 
 
-},{}],199:[function(require,module,exports){
+},{}],200:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Flows the text into the container
 //------------------------------------------------------------------------------
@@ -18968,7 +19076,7 @@ d3plus.textwrap.flow = function( vars ) {
 
 }
 
-},{}],200:[function(require,module,exports){
+},{}],201:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Flows the text as a foreign element.
 //------------------------------------------------------------------------------
@@ -18999,7 +19107,7 @@ d3plus.textwrap.foreign = function( vars ) {
 
 }
 
-},{}],201:[function(require,module,exports){
+},{}],202:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Checks width and height, and gets it if needed.
 //------------------------------------------------------------------------------
@@ -19049,7 +19157,7 @@ d3plus.textwrap.getDimensions = function( vars ) {
 
 }
 
-},{}],202:[function(require,module,exports){
+},{}],203:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Fetches text if not specified, and formats text to array.
 //------------------------------------------------------------------------------
@@ -19075,7 +19183,7 @@ d3plus.textwrap.getSize = function( vars ) {
 
 }
 
-},{}],203:[function(require,module,exports){
+},{}],204:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Fetches text if not specified, and formats text to array.
 //------------------------------------------------------------------------------
@@ -19112,7 +19220,7 @@ d3plus.textwrap.getText = function( vars ) {
 
 }
 
-},{}],204:[function(require,module,exports){
+},{}],205:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Logic to determine the best size for text
 //------------------------------------------------------------------------------
@@ -19174,7 +19282,7 @@ d3plus.textwrap.resize = function( vars , line ) {
 
 }
 
-},{}],205:[function(require,module,exports){
+},{}],206:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Flows the text into tspans
 //------------------------------------------------------------------------------
@@ -19297,7 +19405,7 @@ d3plus.textwrap.tspan = function( vars ) {
 
 }
 
-},{}],206:[function(require,module,exports){
+},{}],207:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Flows the text into the container
 //------------------------------------------------------------------------------
@@ -19319,7 +19427,7 @@ d3plus.textwrap.wrap = function( vars ) {
 
 }
 
-},{}],207:[function(require,module,exports){
+},{}],208:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Word wraps SVG text
 //------------------------------------------------------------------------------
@@ -19358,7 +19466,7 @@ d3plus.textwrap = function() {
 
 }
 
-},{}],208:[function(require,module,exports){
+},{}],209:[function(require,module,exports){
 var fetchValue = require("../core/fetch/value.js"),
     fetchColor = require("../core/fetch/color.js"),
     fetchText  = require("../core/fetch/text.js")
@@ -19651,7 +19759,7 @@ d3plus.tooltip.app = function(params) {
 
 }
 
-},{"../core/fetch/color.js":48,"../core/fetch/text.js":50,"../core/fetch/value.js":51}],209:[function(require,module,exports){
+},{"../core/fetch/color.js":49,"../core/fetch/text.js":51,"../core/fetch/value.js":52}],210:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Correctly positions the tooltip's arrow
 //-------------------------------------------------------------------
@@ -19726,7 +19834,7 @@ d3plus.tooltip.arrow = function(arrow) {
       }
     })
 }
-},{}],210:[function(require,module,exports){
+},{}],211:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Create a Tooltip
 //-------------------------------------------------------------------
@@ -20272,7 +20380,7 @@ d3plus.tooltip.create = function(params) {
 
 }
 
-},{}],211:[function(require,module,exports){
+},{}],212:[function(require,module,exports){
 var fetchValue = require("../core/fetch/value.js"),
     fetchColor = require("../core/fetch/color.js"),
     fetchText  = require("../core/fetch/text.js")
@@ -20555,7 +20663,7 @@ d3plus.tooltip.data = function(vars,id,length,extras,children,depth) {
 
 }
 
-},{"../core/fetch/color.js":48,"../core/fetch/text.js":50,"../core/fetch/value.js":51}],212:[function(require,module,exports){
+},{"../core/fetch/color.js":49,"../core/fetch/text.js":51,"../core/fetch/value.js":52}],213:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Set X and Y position for Tooltip
 //-------------------------------------------------------------------
@@ -20658,7 +20766,7 @@ d3plus.tooltip.move = function(x,y,id) {
     
 }
 
-},{}],213:[function(require,module,exports){
+},{}],214:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Destroy Tooltips
 //-------------------------------------------------------------------
@@ -20686,7 +20794,7 @@ d3plus.tooltip.remove = function(id) {
 
 }
 
-},{}],214:[function(require,module,exports){
+},{}],215:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Expands a min/max into a specified number of buckets
 //------------------------------------------------------------------------------
@@ -20705,7 +20813,7 @@ d3plus.util.buckets = function(arr, buckets) {
   return return_arr
 }
 
-},{}],215:[function(require,module,exports){
+},{}],216:[function(require,module,exports){
 var d3selection;
 
 d3selection = require("./d3selection.js");
@@ -20737,7 +20845,7 @@ d3plus.util.child = function(parent, child) {
 };
 
 
-},{"./d3selection.js":218}],216:[function(require,module,exports){
+},{"./d3selection.js":219}],217:[function(require,module,exports){
 
 /**
  * Finds closest numeric value in array
@@ -20754,7 +20862,7 @@ d3plus.util.closest = function(arr, value) {
 };
 
 
-},{}],217:[function(require,module,exports){
+},{}],218:[function(require,module,exports){
 var objectMerge, objectValidate;
 
 objectMerge = require("../object/merge.coffee");
@@ -20777,7 +20885,7 @@ d3plus.util.copy = function(variable) {
 };
 
 
-},{"../object/merge.coffee":168,"../object/validate.coffee":169}],218:[function(require,module,exports){
+},{"../object/merge.coffee":169,"../object/validate.coffee":170}],219:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Cross-browser detect for D3 element
 //------------------------------------------------------------------------------
@@ -20789,7 +20897,7 @@ d3plus.util.d3selection = function(selection) {
 
 module.exports = d3plus.util.d3selection
 
-},{}],219:[function(require,module,exports){
+},{}],220:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates a Base-64 Data URL from and Image URL
 //------------------------------------------------------------------------------
@@ -20815,7 +20923,7 @@ d3plus.util.dataurl = function(url,callback) {
 
 }
 
-},{}],220:[function(require,module,exports){
+},{}],221:[function(require,module,exports){
 
 /**
  * Returns distances of all objects in array
@@ -20845,7 +20953,7 @@ d3plus.util.distances = function(arr, accessor) {
 };
 
 
-},{}],221:[function(require,module,exports){
+},{}],222:[function(require,module,exports){
 
 /*
  * Gives X and Y offset based off angle and shape
@@ -20914,7 +21022,7 @@ d3plus.util.offset = function(radians, distance, shape) {
 };
 
 
-},{}],222:[function(require,module,exports){
+},{}],223:[function(require,module,exports){
 var objectValidate;
 
 objectValidate = require("../object/validate.coffee");
@@ -20951,7 +21059,7 @@ d3plus.util.uniques = function(data, value) {
 };
 
 
-},{"../object/validate.coffee":169}],223:[function(require,module,exports){
+},{"../object/validate.coffee":170}],224:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Miscellaneous Error Checks
 //------------------------------------------------------------------------------
@@ -20996,7 +21104,7 @@ d3plus.draw.app = function(vars) {
 
 }
 
-},{}],224:[function(require,module,exports){
+},{}],225:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // If placing into a new container, remove it's contents
 // and check text direction.
@@ -21076,7 +21184,7 @@ d3plus.draw.container = function(vars) {
 
 }
 
-},{}],225:[function(require,module,exports){
+},{}],226:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Enter Elements
 //------------------------------------------------------------------------------
@@ -21249,7 +21357,7 @@ d3plus.draw.enter = function(vars) {
 
 }
 
-},{}],226:[function(require,module,exports){
+},{}],227:[function(require,module,exports){
 var fetchText = require("../../core/fetch/text.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Miscellaneous Error Checks
@@ -21341,12 +21449,12 @@ d3plus.draw.errors = function(vars) {
     vars.self.shape(shapes.length ? shapes[0] : "circle")
   }
   else if (shapes.indexOf(vars.shape.value) < 0) {
-    var shapes = vars.types[vars.type.value].shapes.join("\", \"")
+    var shapes = vars.types[vars.type.value].shapes
       , str = vars.format.locale.value.error.accepted
       , shape = "\""+vars.shape.value+"\""
       , shapeStr = vars.format.locale.value.method.shape
       , app = vars.format.locale.value.visualization[vars.type.value] || vars.type.value
-    d3plus.console.warning(d3plus.string.format(str,shape,shapeStr,app,"\""+shapes+"\""),"shape")
+    d3plus.console.warning(d3plus.string.format(str,shape,shapeStr,app,"\""+shapes.join("\", \"")+"\""),"shape")
     vars.self.shape(shapes.length ? shapes[0] : "circle")
   }
 
@@ -21372,7 +21480,7 @@ d3plus.draw.errors = function(vars) {
 
 }
 
-},{"../../core/fetch/text.js":50}],227:[function(require,module,exports){
+},{"../../core/fetch/text.js":51}],228:[function(require,module,exports){
 var methodReset = require("../../core/method/reset.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Finalize Visualization
@@ -21390,7 +21498,7 @@ d3plus.draw.finish = function(vars) {
     if (vars.draw.first) {
       d3plus.zoom.bounds(vars,zoom,0)
     }
-    else if (vars.focus.changed || vars.height.changed || vars.width.changed || vars.nodes.changed) {
+    else if (vars.type.changed || vars.focus.changed || vars.height.changed || vars.width.changed || vars.nodes.changed) {
       d3plus.zoom.bounds(vars,zoom)
     }
 
@@ -21398,7 +21506,9 @@ d3plus.draw.finish = function(vars) {
 
   }
   else {
+    vars.zoom.bounds = [[0,0],[vars.width.viz,vars.height.viz]]
     vars.zoom.scale = 1
+    d3plus.zoom.bounds(vars)
   }
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -21542,7 +21652,7 @@ d3plus.draw.finish = function(vars) {
 
 }
 
-},{"../../core/method/reset.js":53}],228:[function(require,module,exports){
+},{"../../core/method/reset.js":54}],229:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates focus elements, if available
 //------------------------------------------------------------------------------
@@ -21696,7 +21806,7 @@ d3plus.draw.focus = function(vars) {
 
 }
 
-},{}],229:[function(require,module,exports){
+},{}],230:[function(require,module,exports){
 var dataFormat = require("../../core/data/format.js"),
     dataColor  = require("../../core/data/color.js"),
     dataKeys   = require("../../core/data/keys.js"),
@@ -22041,7 +22151,7 @@ d3plus.draw.steps = function(vars) {
 
 }
 
-},{"../../core/data/color.js":41,"../../core/data/format.js":43,"../../core/data/keys.js":44,"../../core/data/load.coffee":45,"../../core/fetch/data.js":49,"../../core/parse/edges.js":54,"../../core/parse/nodes.js":56}],230:[function(require,module,exports){
+},{"../../core/data/color.js":41,"../../core/data/format.js":43,"../../core/data/keys.js":45,"../../core/data/load.coffee":46,"../../core/fetch/data.js":50,"../../core/parse/edges.js":55,"../../core/parse/nodes.js":57}],231:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Updating Elements
 //------------------------------------------------------------------------------
@@ -22108,7 +22218,7 @@ d3plus.draw.update = function(vars) {
 
 }
 
-},{}],231:[function(require,module,exports){
+},{}],232:[function(require,module,exports){
 var fetchText = require("../../core/fetch/text.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Draws "square" and "circle" shapes using svg:rect
@@ -22166,21 +22276,21 @@ d3plus.shape.area = function(vars,selection,enter,exit) {
           "angle": d3.range(-70,71,1),
           "aspectRatio": ratio,
           "tolerance": 0
-        })[0]
+        })
 
-        if (lr) {
+        if (lr && lr[0]) {
 
           var label = {
-            "w": Math.floor(lr.width),
-            "h": Math.floor(lr.height),
-            "x": Math.floor(lr.cx),
-            "y": Math.floor(lr.cy),
-            "angle": lr.angle*-1,
+            "w": Math.floor(lr[0].width),
+            "h": Math.floor(lr[0].height),
+            "x": Math.floor(lr[0].cx),
+            "y": Math.floor(lr[0].cy),
+            "angle": lr[0].angle*-1,
             "padding": 2,
             "names": names
           }
 
-          if (lr.angle !== 0) {
+          if (lr[0].angle !== 0) {
             label.translate = {
               "x":label.x,
               "y":label.y
@@ -22215,7 +22325,7 @@ d3plus.shape.area = function(vars,selection,enter,exit) {
 
 }
 
-},{"../../core/fetch/text.js":50}],232:[function(require,module,exports){
+},{"../../core/fetch/text.js":51}],233:[function(require,module,exports){
 var fetchValue = require("../../core/fetch/value.js")
   , fetchColor = require("../../core/fetch/color.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -22263,7 +22373,7 @@ d3plus.shape.color = function(d,vars) {
 
 }
 
-},{"../../core/fetch/color.js":48,"../../core/fetch/value.js":51}],233:[function(require,module,exports){
+},{"../../core/fetch/color.js":49,"../../core/fetch/value.js":52}],234:[function(require,module,exports){
 var fetchText = require("../../core/fetch/text.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Draws "square" and "circle" shapes using svg:rect
@@ -22439,7 +22549,7 @@ d3plus.shape.coordinates = function(vars,selection,enter,exit) {
 
 }
 
-},{"../../core/fetch/text.js":50}],234:[function(require,module,exports){
+},{"../../core/fetch/text.js":51}],235:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Draws "donut" shapes using svg:path with arcs
 //------------------------------------------------------------------------------
@@ -22540,7 +22650,7 @@ d3plus.shape.donut = function(vars,selection,enter,exit) {
 
 }
 
-},{}],235:[function(require,module,exports){
+},{}],236:[function(require,module,exports){
 var fetchValue = require("../../core/fetch/value.js"),
     fetchColor = require("../../core/fetch/color.js"),
     fetchText  = require("../../core/fetch/text.js")
@@ -23208,7 +23318,7 @@ d3plus.shape.draw = function(vars) {
 
 }
 
-},{"../../core/fetch/color.js":48,"../../core/fetch/text.js":50,"../../core/fetch/value.js":51}],236:[function(require,module,exports){
+},{"../../core/fetch/color.js":49,"../../core/fetch/text.js":51,"../../core/fetch/value.js":52}],237:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Draws "square" and "circle" shapes using svg:rect
 //------------------------------------------------------------------------------
@@ -23764,7 +23874,7 @@ d3plus.shape.edges = function(vars) {
 
 }
 
-},{}],237:[function(require,module,exports){
+},{}],238:[function(require,module,exports){
 var fetchColor = require("../../core/fetch/color.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Draws "square" and "circle" shapes using svg:rect
@@ -24041,14 +24151,14 @@ d3plus.shape.fill = function(vars,selection,enter,exit) {
 
 }
 
-},{"../../core/fetch/color.js":48}],238:[function(require,module,exports){
+},{"../../core/fetch/color.js":49}],239:[function(require,module,exports){
 var fetchText = require("../../core/fetch/text.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Draws "labels" using svg:text and d3plus.textwrap
 //------------------------------------------------------------------------------
 d3plus.shape.labels = function( vars , group ) {
 
-  var scale = vars.zoom.behavior.scaleExtent()
+  var scale = vars.types[vars.type.value].zoom ? vars.zoom.behavior.scaleExtent() : [1,1]
     , selection = vars.g[ group ].selectAll("g")
 
   var opacity = function(elem) {
@@ -24294,7 +24404,6 @@ d3plus.shape.labels = function( vars , group ) {
     selection.each(function(d){
 
       var disabled = d.d3plus && "label" in d.d3plus && !d.d3plus.label,
-          stat = d.d3plus && "static" in d.d3plus && d.d3plus.static
           label = d.d3plus_label ? d.d3plus_label : vars.zoom.labels ? vars.zoom.labels[d.d3plus.id] : null,
           share = d.d3plus_share,
           names = label && label.names ? label.names : fetchText(vars,d),
@@ -24316,7 +24425,7 @@ d3plus.shape.labels = function( vars , group ) {
 
       }
 
-      if (!disabled && (background || !fill) && !stat) {
+      if (!disabled && (background || !fill)) {
 
         if (share && d.d3plus.share && vars.labels.align != "middle") {
 
@@ -24564,7 +24673,7 @@ d3plus.shape.labels = function( vars , group ) {
   }
 }
 
-},{"../../core/fetch/text.js":50}],239:[function(require,module,exports){
+},{"../../core/fetch/text.js":51}],240:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Draws "line" shapes using svg:line
 //------------------------------------------------------------------------------
@@ -24587,10 +24696,8 @@ d3plus.shape.line = function(vars,selection,enter,exit) {
   // point on the line.
   //----------------------------------------------------------------------------
 
-  var hitarea = vars.data.stroke.width
-  if (hitarea < 30) {
-    hitarea = 30
-  }
+  var stroke = vars.data.stroke.width * 2
+    , hitarea = stroke < 30 ? 30 : stroke
 
   selection.each(function(d){
 
@@ -24730,11 +24837,11 @@ d3plus.shape.line = function(vars,selection,enter,exit) {
 
           d3.select(this.parentNode).selectAll("path.d3plus_line")
             .transition().duration(vars.timing.mouseevents)
-            .style("stroke-width",vars.data.stroke.width*2)
+            .style("stroke-width",stroke*2)
 
           d3.select(this.parentNode).selectAll("rect")
             .transition().duration(vars.timing.mouseevents)
-            .style("stroke-width",vars.data.stroke.width*2)
+            .style("stroke-width",stroke)
             .call(update,2)
 
         }
@@ -24746,7 +24853,7 @@ d3plus.shape.line = function(vars,selection,enter,exit) {
 
           d3.select(this.parentNode).selectAll("path.d3plus_line")
             .transition().duration(vars.timing.mouseevents)
-            .style("stroke-width",vars.data.stroke.width)
+            .style("stroke-width",stroke)
 
           d3.select(this.parentNode).selectAll("rect")
             .transition().duration(vars.timing.mouseevents)
@@ -24832,7 +24939,7 @@ d3plus.shape.line = function(vars,selection,enter,exit) {
 
 }
 
-},{}],240:[function(require,module,exports){
+},{}],241:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Draws "square" and "circle" shapes using svg:rect
 //------------------------------------------------------------------------------
@@ -24980,7 +25087,7 @@ d3plus.shape.rect = function(vars,selection,enter,exit) {
 
 }
 
-},{}],241:[function(require,module,exports){
+},{}],242:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Fill style for all shapes
 //-------------------------------------------------------------------
@@ -25006,36 +25113,43 @@ d3plus.shape.style = function(nodes,vars) {
       }
       return d3.rgb(color).darker(0.5)
     })
-    .style("stroke-width",vars.data.stroke.width)
+    .style("stroke-width",function(d){
+      var mod = d.d3plus.shapeType === "line" ? 2 : 1
+      return vars.data.stroke.width * mod
+    })
     .attr("opacity",vars.data.opacity)
     .attr("vector-effect","non-scaling-stroke")
 
 }
 
-},{}],242:[function(require,module,exports){
+},{}],243:[function(require,module,exports){
 var fetchValue = require("../../core/fetch/value.js"),
     fetchColor = require("../../core/fetch/color.js"),
-    fetchText  = require("../../core/fetch/text.js")
+    fetchText  = require("../../core/fetch/text.js"),
+    groupData = require("../../core/data/group.coffee")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Bubbles
 //------------------------------------------------------------------------------
 var bubbles = function(vars) {
 
+  var groupedData = groupData(vars,vars.data.app)
+
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Test for labels
   //----------------------------------------------------------------------------
-  var label_height = vars.labels.value && !vars.small ? 50 : 0
+  var maxChildren = d3.max(groupedData,function(d){return d.values instanceof Array ? d.values.length : 1})
+  var label_height = vars.labels.value && !vars.small && maxChildren > 1 ? 50 : 0
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Sort Data
   //----------------------------------------------------------------------------
-  d3plus.array.sort( vars.data.app , vars.order.value || vars.size.value
+  d3plus.array.sort( groupedData , vars.order.value || vars.size.value
                    , vars.order.sort.value , vars.color.value , vars )
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Calculate rows and columns
   //----------------------------------------------------------------------------
-  var dataLength = vars.data.app.length
+  var dataLength = groupedData.length
 
   if (dataLength < 4) {
 
@@ -25066,12 +25180,12 @@ var bubbles = function(vars) {
   //----------------------------------------------------------------------------
   var domain_min = d3.min(vars.data.app, function(d){
     if (!vars.size.value) return 0
-    return fetchValue(vars,d,vars.size.value,null,"min")
+    return fetchValue(vars,d,vars.size.value,vars.id.value,"min")
   })
 
   var domain_max = d3.max(vars.data.app, function(d){
     if (!vars.size.value) return 0
-    return fetchValue(vars,d,vars.size.value)
+    return fetchValue(vars,d,vars.size.value,vars.id.value)
   })
 
   var padding = 5
@@ -25087,21 +25201,23 @@ var bubbles = function(vars) {
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Calculate bubble packing
   //----------------------------------------------------------------------------
+
   var pack = d3.layout.pack()
-    .size([column_width-padding*2,column_height-padding*2-label_height])
-    .value(function(d) {
-      if (!vars.size.value) return 0
-      return fetchValue(vars,d,vars.size.value)
+    .children(function(d) {
+      return d.values
     })
     .padding(padding)
     .radius(function(d){
       return size(d)
     })
+    .size([column_width-padding*2,column_height-padding*2-label_height])
+    .value(function(d){
+      return d.value
+    })
 
   var data = []
-
   var row = 0
-  vars.data.app.forEach(function(d,i){
+  groupedData.forEach(function(d,i){
 
     var temp = pack.nodes(d)
 
@@ -25109,23 +25225,26 @@ var bubbles = function(vars) {
         yoffset = column_height*row
 
     temp.forEach(function(t){
-      t.xoffset = xoffset
-      t.yoffset = yoffset+label_height
-      if (t.depth < vars.depth.value) {
-        t.d3plus.static = true
-      }
-      else {
-        t.d3plus.static = false
-      }
-      if (temp.length == 1) {
-        t.d3plus.label = false
-      }
-      else {
-        t.d3plus.label = true
-      }
-    })
 
-    data = data.concat(temp)
+      var obj = t.d3plus || {"d3plus": {}}
+      if (t.d3plus) {
+        var obj = t.d3plus
+      }
+      else {
+        var obj = {"d3plus": {}}
+        obj[vars.id.value] = t.key
+      }
+
+      obj.d3plus.depth = t.depth
+
+      obj.d3plus.x = t.x
+      obj.d3plus.xOffset = xoffset
+      obj.d3plus.y = t.y
+      obj.d3plus.yOffset = yoffset+label_height
+      obj.d3plus.r = t.r
+      data.push(obj)
+
+    })
 
     if ((i+1) % columns == 0) {
       row++
@@ -25133,83 +25252,46 @@ var bubbles = function(vars) {
 
   })
 
-  var downscale = size_max/d3.max(data,function(d){ return d.r })
+  var downscale = size_max/d3.max(data,function(d){ return d.d3plus.r })
+
+  var xPadding = pack.size()[0]/2,
+      yPadding = pack.size()[1]/2
 
   data.forEach(function(d){
-    d.x = ((d.x-column_width/2)*downscale)+column_width/2
-    d.d3plus.x = d.x+d.xoffset
-    d.y = ((d.y-column_height/2)*downscale)+column_height/2
-    d.d3plus.y = d.y+d.yoffset
-    d.r = d.r*downscale
-    d.d3plus.r = d.r
+
+    d.d3plus.x = ((d.d3plus.x-xPadding)*downscale)+xPadding+d.d3plus.xOffset
+    d.d3plus.y = ((d.d3plus.y-yPadding)*downscale)+yPadding+d.d3plus.yOffset
+    d.d3plus.r = d.d3plus.r*downscale
+    delete d.d3plus.xOffset
+    delete d.d3plus.yOffset
+
+    if (d.d3plus.depth < vars.depth.value) {
+      d.d3plus.static = true
+
+      if (d.d3plus.depth === 0) {
+        d.d3plus.label = {
+          "x": 0,
+          "y": -(size_max+label_height/2),
+          "w": size_max*1.5,
+          "h": label_height,
+          "color": d3plus.color.legible(fetchColor(vars,d,d.d3plus.depth)),
+        }
+      }
+      else {
+        d.d3plus.label = false
+      }
+
+    }
+    else {
+      d.d3plus.static = false
+      delete d.d3plus.label
+    }
+
   })
 
   data.sort(function( a , b ){
-    return a.depth - b.depth
+    return a.d3plus.depth - b.d3plus.depth
   })
-
-  var label_data = data.filter(function(d){
-    return d.depth == 0
-  })
-
-  var labels = vars.group.selectAll("text.d3plus_bubble_label")
-    .data(label_data,function(d){
-      if (!d.d3plus.label_height) d.d3plus.label_height = 0
-      return d[vars.id.nesting[d.depth]]
-    })
-
-  function label_style(l) {
-    l
-      .attr("x",function(d){
-        return d.d3plus.x
-      })
-      .attr("y",function(d){
-        return d.d3plus.y-d.r-d.d3plus.label_height-padding
-      })
-      .style("text-anchor","middle")
-      .attr("font-weight",vars.labels.font.weight)
-      .attr("font-family",vars.labels.font.family.value)
-      .attr("font-size","12px")
-      .style("fill",function(d){
-        var color = fetchColor(vars,d)
-        return d3plus.color.legible(color)
-      })
-      .each(function(d){
-        if (d.r > 10 && label_height > 10) {
-
-          var names = fetchText(vars,d,d.depth)
-
-          d3plus.textwrap()
-            .container( d3.select(this) )
-            .height( label_height )
-            .text( names )
-            .width( column_width - padding * 2 )
-            .draw()
-
-        }
-      })
-      .attr("y",function(d){
-        d.d3plus.label_height = d3.select(this).node().getBBox().height
-        return d.d3plus.y-d.r-d.d3plus.label_height-padding
-      })
-      .selectAll("tspan")
-        .attr("x",function(d){
-          return d.d3plus.x
-        })
-  }
-
-  labels.enter().append("text")
-    .attr("class","d3plus_bubble_label")
-    .call(label_style)
-    .attr("opacity",0)
-
-  labels.transition().duration(vars.draw.timing)
-    .call(label_style)
-    .attr("opacity",1)
-
-  labels.exit()
-    .attr("opacity",0)
-    .remove()
 
   return data
 
@@ -25226,7 +25308,7 @@ bubbles.tooltip      = "static"
 
 module.exports = bubbles
 
-},{"../../core/fetch/color.js":48,"../../core/fetch/text.js":50,"../../core/fetch/value.js":51}],243:[function(require,module,exports){
+},{"../../core/data/group.coffee":44,"../../core/fetch/color.js":49,"../../core/fetch/text.js":51,"../../core/fetch/value.js":52}],244:[function(require,module,exports){
 var fetchValue = require("../../core/fetch/value.js")
   , fetchColor = require("../../core/fetch/color.js")
   , fetchData  = require("../../core/fetch/data.js")
@@ -25383,7 +25465,10 @@ var chart = function(vars) {
     if (data) {
 
       if ( vars.dev.value ) d3plus.console.time("determining size scale")
-      if (vars.size.value) {
+      if (typeof vars.size.value === "number"){
+        var size_domain = [vars.size.value, vars.size.value]
+      }
+      else if (vars.size.value) {
         if (vars.time.fixed.value) {
           var size_domain = d3.extent(vars.data.app,function(d){
             var val = fetchValue(vars,d,vars.size.value)
@@ -25406,12 +25491,18 @@ var chart = function(vars) {
         var size_domain = [0,0]
       }
 
-      var max_size = Math.floor(d3.max([d3.min([graph.width,graph.height])/15,10])),
-          min_size = 10
+      if(typeof vars.size.value == "number"){
+        var size_range = size_domain;
+      }
+      else {
+        var min_size = 2,
+            max_size = Math.floor(d3.max([d3.min([graph.width,graph.height])/15, min_size]));
+            
 
-      if (size_domain[0] == size_domain[1]) var min_size = max_size
+        if (size_domain[0] == size_domain[1]) var min_size = max_size
 
-      var size_range = [min_size,max_size]
+        var size_range = [min_size,max_size]
+      }
 
       var radius = vars.size.scale.value
         .domain(size_domain)
@@ -26322,7 +26413,7 @@ chart.tooltip      = "static"
 
 module.exports = chart
 
-},{"../../core/fetch/color.js":48,"../../core/fetch/data.js":49,"../../core/fetch/value.js":51}],244:[function(require,module,exports){
+},{"../../core/fetch/color.js":49,"../../core/fetch/data.js":50,"../../core/fetch/value.js":52}],245:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Geo Map
 //------------------------------------------------------------------------------
@@ -26371,7 +26462,7 @@ geo_map.zoom         = true
 
 module.exports = geo_map
 
-},{}],245:[function(require,module,exports){
+},{}],246:[function(require,module,exports){
 var chart = require("./chart.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Line Plot
@@ -26397,7 +26488,7 @@ line.tooltip      = "static"
 
 module.exports = line
 
-},{"./chart.js":243}],246:[function(require,module,exports){
+},{"./chart.js":244}],247:[function(require,module,exports){
 var fetchValue = require("../../core/fetch/value.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Network
@@ -26412,44 +26503,55 @@ var network = function(vars) {
 
   var x_range = d3.extent(nodes,function(n){return n.x}),
       y_range = d3.extent(nodes,function(n){return n.y})
-
-  var val_range = vars.size.value ? d3.extent(nodes, function(d){
-    var val = fetchValue( vars , d , vars.size.value )
-    return val === 0 ? null : val
-  }) : [ 1 , 1 ]
-
-  if (typeof val_range[0] == "undefined") val_range = [1,1]
-
-  var max_size = d3.min(d3plus.util.distances(nodes))
-
-  var overlap = vars.size.value ? vars.nodes.overlap : 0.4
-  max_size = max_size * overlap
-
-  if (vars.edges.arrows.value) {
-    max_size = max_size * 0.5
+  
+  var val_range = [ 1 , 1 ]
+  if (typeof vars.size.value === "number"){
+    val_range = [vars.size.value, vars.size.value]
   }
-
-  if ( val_range[0] === val_range[1] ) {
-    var min_size = max_size
+  else if (vars.size.value){
+    val_range = d3.extent(nodes, function(d){
+      var val = fetchValue( vars , d , vars.size.value )
+      return val === 0 ? null : val
+    })
+  }
+  if (typeof val_range[0] == "undefined") val_range = [1,1]
+  
+  if (typeof vars.size.value === "number"){
+    var max_size = vars.size.value;
+    var min_size = vars.size.value;
   }
   else {
+    var max_size = d3.min(d3plus.util.distances(nodes))
 
-    var width = (x_range[1]+max_size*1.1)-(x_range[0]-max_size*1.1),
-        height = (y_range[1]+max_size*1.1)-(y_range[0]-max_size*1.1)
-        aspect = width/height,
-        app = vars.width.viz/vars.height.viz
+    var overlap = vars.size.value ? vars.nodes.overlap : 0.4
+    max_size = max_size * overlap
 
-    if ( app > aspect ) {
-      var scale = vars.height.viz/height
+    if (vars.edges.arrows.value) {
+      max_size = max_size * 0.5
+    }
+
+    if ( val_range[0] === val_range[1] ) {
+      var min_size = max_size
     }
     else {
-      var scale = vars.width.viz/width
-    }
-    var min_size = max_size * 0.25
-    if ( min_size * scale < 2 ) {
-      min_size = 2/scale
-    }
 
+      var width = (x_range[1]+max_size*1.1)-(x_range[0]-max_size*1.1),
+          height = (y_range[1]+max_size*1.1)-(y_range[0]-max_size*1.1)
+          aspect = width/height,
+          app = vars.width.viz/vars.height.viz
+
+      if ( app > aspect ) {
+        var scale = vars.height.viz/height
+      }
+      else {
+        var scale = vars.width.viz/width
+      }
+      var min_size = max_size * 0.25
+      if ( min_size * scale < 2 ) {
+        min_size = 2/scale
+      }
+
+    }
   }
 
   // Create size scale
@@ -26470,12 +26572,9 @@ var network = function(vars) {
       return a[vars.id.value] == n[vars.id.value]
     })[0]
 
-    if (d) {
-      var obj = d3plus.object.merge(n,d)
-    }
-    else {
-      var obj = d3plus.util.copy(n)
-    }
+    var obj = d || {}
+
+    obj[vars.id.value] = n[vars.id.value]
 
     obj.d3plus = {}
     obj.d3plus.x = n.x
@@ -26487,6 +26586,7 @@ var network = function(vars) {
       "y": obj.d3plus.y,
       "r": obj.d3plus.r
     }
+
     data.push(obj)
   })
 
@@ -26495,6 +26595,10 @@ var network = function(vars) {
   })
 
   edges.forEach(function(l,i){
+
+    if (l.d3plus) {
+      delete l.d3plus.spline
+    }
 
     l[vars.edges.source].d3plus = {}
     var source = lookup[l[vars.edges.source][vars.id.value]]
@@ -26526,7 +26630,7 @@ network.zoom         = true
 
 module.exports = network
 
-},{"../../core/fetch/value.js":51}],247:[function(require,module,exports){
+},{"../../core/fetch/value.js":52}],248:[function(require,module,exports){
 var fetchValue, shortestPath, viz,
   __indexOf = [].indexOf || function(item) { for (var i = 0, l = this.length; i < l; i++) { if (i in this && this[i] === item) return i; } return -1; };
 
@@ -26781,7 +26885,7 @@ viz.tooltip = "static";
 module.exports = viz;
 
 
-},{"../../core/fetch/value.js":51,"../../network/shortestPath.coffee":165}],248:[function(require,module,exports){
+},{"../../core/fetch/value.js":52,"../../network/shortestPath.coffee":166}],249:[function(require,module,exports){
 var fetchValue = require("../../core/fetch/value.js")
   , fetchColor = require("../../core/fetch/color.js")
 var rings = function(vars) {
@@ -27261,7 +27365,7 @@ rings.tooltip      = "static"
 
 module.exports = rings
 
-},{"../../core/fetch/color.js":48,"../../core/fetch/value.js":51}],249:[function(require,module,exports){
+},{"../../core/fetch/color.js":49,"../../core/fetch/value.js":52}],250:[function(require,module,exports){
 var chart = require("./chart.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Scatterplot
@@ -27287,7 +27391,7 @@ scatter.tooltip      = "static"
 
 module.exports = scatter
 
-},{"./chart.js":243}],250:[function(require,module,exports){
+},{"./chart.js":244}],251:[function(require,module,exports){
 var chart = require("./chart.js"),
     dataThreshold = require("../../core/data/threshold.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
@@ -27345,51 +27449,16 @@ stacked.tooltip      = "static"
 
 module.exports = stacked
 
-},{"../../core/data/threshold.js":47,"./chart.js":243}],251:[function(require,module,exports){
+},{"../../core/data/threshold.js":48,"./chart.js":244}],252:[function(require,module,exports){
 var dataThreshold = require("../../core/data/threshold.js"),
-    fetchValue = require("../../core/fetch/value.js")
+    fetchValue = require("../../core/fetch/value.js"),
+    groupData = require("../../core/data/group.coffee")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Tree Map
 //------------------------------------------------------------------------------
 var tree_map = function(vars) {
 
-  //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-  // Group the data by each depth defined by the .id() method.
-  //----------------------------------------------------------------------------
-  var grouped_data = d3.nest()
-
-  vars.id.nesting.forEach(function(n,i){
-
-    if (i < vars.depth.value) {
-
-      grouped_data.key(function(d){
-
-        return fetchValue(vars,d.d3plus,n)
-
-      })
-
-    }
-
-  })
-
-  var strippedData = []
-  vars.data.app.forEach(function(d){
-
-    var val = fetchValue(vars,d,vars.size.value)
-
-    if (val && typeof val === "number") {
-
-      strippedData.push({
-        "d3plus" : d,
-        "id"     : d[vars.id.value],
-        "value"  : fetchValue(vars,d,vars.size.value)
-      })
-
-    }
-
-  })
-
-  grouped_data = grouped_data.entries(strippedData)
+  grouped_data = groupData(vars,vars.data.app)
 
   //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
   // Pass data through the D3js .treemap() layout.
@@ -27484,7 +27553,7 @@ tree_map.tooltip      = "follow"
 
 module.exports = tree_map
 
-},{"../../core/data/threshold.js":47,"../../core/fetch/value.js":51}],252:[function(require,module,exports){
+},{"../../core/data/group.coffee":44,"../../core/data/threshold.js":48,"../../core/fetch/value.js":52}],253:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Draws a UI drawer, if defined.
 //------------------------------------------------------------------------------
@@ -27586,7 +27655,7 @@ d3plus.ui.drawer = function( vars ) {
 
 }
 
-},{}],253:[function(require,module,exports){
+},{}],254:[function(require,module,exports){
 var fetchValue = require("../../core/fetch/value.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates focus tooltip, if applicable
@@ -27617,7 +27686,7 @@ d3plus.ui.focus = function(vars) {
       "data": data,
       "length": "long",
       "fullscreen": false,
-      "id": vars.type.value+"_focus",
+      "id": "visualization_focus",
       "maxheight": vars.height.viz-offset*2,
       "mouseevents": true,
       "offset": 0,
@@ -27627,7 +27696,7 @@ d3plus.ui.focus = function(vars) {
       "width": vars.tooltip.large
     })
 
-    if(!d3.select("div#d3plus_tooltip_id_"+vars.type.value+"_focus").empty()) {
+    if(!d3.select("div#d3plus_tooltip_id_visualization_focus").empty()) {
       vars.width.viz -= (vars.tooltip.large+offset*2)
     }
 
@@ -27635,12 +27704,12 @@ d3plus.ui.focus = function(vars) {
 
   }
   else {
-    d3plus.tooltip.remove(vars.type.value+"_focus")
+    d3plus.tooltip.remove("visualization_focus")
   }
 
 }
 
-},{"../../core/fetch/value.js":51}],254:[function(require,module,exports){
+},{"../../core/fetch/value.js":52}],255:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates "back" button, if applicable
 //------------------------------------------------------------------------------
@@ -27750,7 +27819,7 @@ d3plus.ui.history = function(vars) {
 
 }
 
-},{}],255:[function(require,module,exports){
+},{}],256:[function(require,module,exports){
 var dataNest   = require("../../core/data/nest.js"),
     fetchValue = require("../../core/fetch/value.js"),
     fetchColor = require("../../core/fetch/color.js"),
@@ -27772,39 +27841,21 @@ d3plus.ui.legend = function(vars) {
       if ( vars.dev.value ) d3plus.console.time("grouping data by colors")
 
       if ( vars.nodes.value && vars.types[vars.type.value].requirements.indexOf("nodes") >= 0 ) {
-        var data = vars.nodes.restriced || vars.nodes.value
+        var data = d3plus.util.copy(vars.nodes.restriced || vars.nodes.value)
         if ( vars.data.app.length ) {
           for ( var i = 0 ; i < data.length ; i++ ) {
             var appData = vars.data.app.filter(function(a){
               return a[vars.id.value] === data[i][vars.id.value]
             })
             if (appData.length) {
-              data[i] = d3plus.object.merge(data[i],appData[0])
+              data[i] = appData[0]
             }
           }
         }
       }
       else {
         var data = vars.data.app
-        // var data = dataNest(vars, vars.data.app, vars.id.nesting, [])
       }
-
-      // for ( var z = 0 ; z < data.length ; z++ ) {
-      //
-      //   d = data[z]
-      //
-      //   for ( var i = 0 ; i < vars.id.nesting.length ; i++ ) {
-      //
-      //     var colorKey = vars.id.nesting[i]
-      //
-      //     if ( !(colorKey in d) ) {
-      //       var nextKey = vars.id.nesting[ i + 1 ]
-      //       d[colorKey] = fetchValue( vars , d[nextKey] , colorKey , nextKey )
-      //     }
-      //
-      //   }
-      //
-      // }
 
       var colorFunction = function( d ){
             return fetchColor( vars , d , colorKey )
@@ -27837,22 +27888,6 @@ d3plus.ui.legend = function(vars) {
       }
 
       var colors = dataNest( vars , data , [ colorFunction ] , [] )
-
-      // for ( var z = 0 ; z < colors.length ; z++ ) {
-      //
-      //   var d = colors[z]
-      //
-      //   // var nextKey = vars.id.nesting[ colorDepth + 1 ]
-      //   //
-      //   // d[colorKey] = d[colorKey]
-      //   //   || fetchValue( vars , d[nextKey] , colorKey , nextKey )
-      //   //
-      //   // d[colorName] = d[colorName]
-      //   //   || fetchValue( vars , d[colorKey][0] , colorName, colorKey )
-      //
-      //   d.d3plus.colorDepth = colorDepth
-      //
-      // }
 
       if ( vars.dev.value ) d3plus.console.timeEnd("grouping data by color")
 
@@ -27893,7 +27928,7 @@ d3plus.ui.legend = function(vars) {
         var order = vars[vars.legend.order.value].value
 
         d3plus.array.sort( colors , order , vars.legend.order.sort.value
-                         , colorName , vars )
+                         , colorName , vars , colorDepth )
 
         if ( vars.dev.value ) d3plus.console.timeEnd("sorting legend")
 
@@ -27940,10 +27975,8 @@ d3plus.ui.legend = function(vars) {
 
               d3.select(this.parentNode).selectAll("text").remove()
 
-              var depth = "depth" in g.d3plus ? g.d3plus.depth : vars.depth.value
-                , depthId = vars.id.nesting[depth]
-                , icon = fetchValue( vars , g , vars.icon.value , depthId )
-                , color = fetchColor( vars , g , depthId )
+              var icon = fetchValue( vars , g , vars.icon.value , colorKey )
+                , color = fetchColor( vars , g , colorKey )
 
               if (icon && icon !== "null") {
 
@@ -27955,8 +27988,8 @@ d3plus.ui.legend = function(vars) {
                 if (typeof iconStyle === "string") {
                   var icon_style = vars.icon.style.value
                 }
-                else if (d3plus.object.validate(iconStyle) && iconStyle[depthId]) {
-                  var icon_style = iconStyle[depthId]
+                else if (d3plus.object.validate(iconStyle) && iconStyle[colorKey]) {
+                  var icon_style = iconStyle[colorKey]
                 }
                 else {
                   var icon_style = "default"
@@ -28024,8 +28057,7 @@ d3plus.ui.legend = function(vars) {
                   .attr("y",0)
                   .each(function(t){
 
-                    var idIndex = vars.id.nesting.indexOf(colorKey)
-                      , text = idIndex >= 0 ? fetchText(vars,t,idIndex) : [vars.format.value(fetchValue(vars,t,colorName,colorKey))]
+                    var text = fetchText(vars,t,colorDepth)
 
                     if (text.length === 1 && text[0].length) {
 
@@ -28374,7 +28406,7 @@ d3plus.ui.legend = function(vars) {
 
 }
 
-},{"../../core/data/nest.js":46,"../../core/fetch/color.js":48,"../../core/fetch/text.js":50,"../../core/fetch/value.js":51}],256:[function(require,module,exports){
+},{"../../core/data/nest.js":47,"../../core/fetch/color.js":49,"../../core/fetch/text.js":51,"../../core/fetch/value.js":52}],257:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates Centered Server Message
 //------------------------------------------------------------------------------
@@ -28485,7 +28517,7 @@ d3plus.ui.message = function(vars,message) {
 
 }
 
-},{}],257:[function(require,module,exports){
+},{}],258:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Creates color key
 //-------------------------------------------------------------------
@@ -28934,7 +28966,7 @@ d3plus.ui.timeline = function(vars) {
 
 }
 
-},{}],258:[function(require,module,exports){
+},{}],259:[function(require,module,exports){
 var fetchValue = require("../../core/fetch/value.js")
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Draws appropriate titles
@@ -29250,7 +29282,7 @@ d3plus.ui.titles = function(vars) {
 
 }
 
-},{"../../core/fetch/value.js":51}],259:[function(require,module,exports){
+},{"../../core/fetch/value.js":52}],260:[function(require,module,exports){
 d3plus.viz = function() {
 
   var vars = {
@@ -29453,7 +29485,7 @@ d3plus.viz = function() {
 
 }
 
-},{"./types/bubbles.js":242,"./types/chart.js":243,"./types/geo_map.js":244,"./types/line.js":245,"./types/network.js":246,"./types/paths.coffee":247,"./types/rings.js":248,"./types/scatter.js":249,"./types/stacked.js":250,"./types/tree_map.js":251}],260:[function(require,module,exports){
+},{"./types/bubbles.js":243,"./types/chart.js":244,"./types/geo_map.js":245,"./types/line.js":246,"./types/network.js":247,"./types/paths.coffee":248,"./types/rings.js":249,"./types/scatter.js":250,"./types/stacked.js":251,"./types/tree_map.js":252}],261:[function(require,module,exports){
 d3plus.zoom.bounds = function( vars , b , timing ) {
 
   if (!b) {
@@ -29479,7 +29511,9 @@ d3plus.zoom.bounds = function( vars , b , timing ) {
 
   var min = d3.min([vars.width.viz,vars.height.viz])
 
-  var scale = ((min-(vars.coords.padding*2)) / min) / aspect
+  var padding = vars.types[vars.type.value].zoom ? vars.coords.padding*2 : 0
+
+  var scale = ((min-padding) / min) / aspect
 
   var extent = vars.zoom.behavior.scaleExtent()
 
@@ -29510,7 +29544,7 @@ d3plus.zoom.bounds = function( vars , b , timing ) {
 
 }
 
-},{}],261:[function(require,module,exports){
+},{}],262:[function(require,module,exports){
 d3plus.zoom.controls = function() {
 
   d3.select("#d3plus.utilsts.zoom_controls").remove()
@@ -29594,7 +29628,7 @@ d3plus.zoom.controls = function() {
 
 }
 
-},{}],262:[function(require,module,exports){
+},{}],263:[function(require,module,exports){
 //^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
 // Sets label opacity based on zoom
 //------------------------------------------------------------------------------
@@ -29632,7 +29666,7 @@ d3plus.zoom.labels = function(vars) {
 
 }
 
-},{}],263:[function(require,module,exports){
+},{}],264:[function(require,module,exports){
 d3plus.zoom.mouse = function(vars) {
 
   var translate = d3.event.translate,
@@ -29685,7 +29719,7 @@ d3plus.zoom.mouse = function(vars) {
 
 }
 
-},{}],264:[function(require,module,exports){
+},{}],265:[function(require,module,exports){
 d3plus.zoom.transform = function(vars,timing) {
 
   if (typeof timing !== "number") {
@@ -29709,4 +29743,4 @@ d3plus.zoom.transform = function(vars,timing) {
 
 }
 
-},{}]},{},[96,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,87,65,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,88,89,90,91,92,93,94,95,97,98,99,100,109,101,102,103,104,105,106,107,108,110,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,197,198,174,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,207,199,200,201,202,203,204,205,206,208,209,210,211,212,213,214,215,216,217,218,219,220,221,222,259,223,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255,256,257,258,260,261,262,263,264])
+},{}]},{},[97,31,32,33,34,35,36,37,38,39,40,41,42,43,44,45,46,47,48,49,50,51,52,53,54,55,56,57,58,59,60,61,62,63,64,65,88,66,67,68,69,70,71,72,73,74,75,76,77,78,79,80,81,82,83,84,85,86,87,89,90,91,92,93,94,95,96,98,99,100,101,110,102,103,104,105,106,107,108,109,111,112,113,114,115,116,117,118,119,120,121,122,123,124,125,126,127,128,129,130,131,132,133,134,135,136,137,138,139,140,141,142,143,144,145,146,147,148,149,150,151,152,153,154,155,156,157,158,159,160,161,162,163,164,165,166,167,168,169,170,171,172,173,174,198,199,175,176,177,178,179,180,181,182,183,184,185,186,187,188,189,190,191,192,193,194,195,196,197,208,200,201,202,203,204,205,206,207,209,210,211,212,213,214,215,216,217,218,219,220,221,222,223,260,224,225,226,227,228,229,230,231,232,233,234,235,236,237,238,239,240,241,242,243,244,245,246,247,248,249,250,251,252,253,254,255,256,257,258,259,261,262,263,264,265])
