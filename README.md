@@ -15,5 +15,6 @@ Once Jekyll is installed and running you'll need to install the site's dependenc
 ```sh
 bundle install
 bundle exec jekyll serve
+```
 
 You can now view the site in your browser at: http://localhost:4000
