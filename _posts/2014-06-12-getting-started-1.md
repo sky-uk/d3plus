@@ -1,7 +1,7 @@
 ---
 layout: post  
 title: Getting Started with D3plus part 1&#58; The Basics
-subtitle: Leaning the basics of D3plus with US crime data
+subtitle: Learning the basics of D3plus with US crime data
 category: getting-started
 author: alex
 author_url: https://twitter.com/ximoes
