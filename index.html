@@ -39,23 +39,31 @@ style: blog
 
   section {
     margin: 75px 3% 0px;
-    text-align: center;
+    text-align: left;
     width: 94%;
   }
 
-  section.half {
+  section#examples, section#posts {
     display: inline-block;
-    margin: 15px 2%;
-    width: 45%;
+    margin: 75px 2% 0px;
     vertical-align: top;
   }
 
-  section.half .button.right {
-    top: 20px;
+  section#examples {
+    text-align: center;
+    width: 53%;
   }
 
-  section h2 {
+  section#posts {
+    width: 37%;
+  }
+
+  section#examples > h1, section#examples > a {
     text-align: left;
+  }
+
+  section#links {
+    text-align: center;
   }
 
   section#links a {
@@ -74,25 +82,12 @@ style: blog
     display: inline-block;
   }
 
-  section#releases div.body {
-    display: inline-block;
-    font-size: 12px;
-    line-height: 15px;
-    text-align: left;
-    width: 90%;
-  }
-
-  section#releases div.body h2 {
-    text-align: center;
-  }
-
   a.example {
     margin: 10px 10px 25px 10px !important;
   }
 
   .post {
-    padding: 10px 25px;
-    text-align: left;
+    padding: 10px 0px;
   }
 
   .post-title > a {
@@ -142,21 +137,23 @@ style: blog
   </a>
 </section>
 
-<section id="examples">
+<section class="half" id="examples">
 
-    <h2 class="bar">Recent Examples</h2>
+    <h1>Recent Examples</h1>
 
-    <a class="button right" href="/examples/">
-      More Examples <i class="fa fa-angle-right"></i>
+    <a class="moreButton" href="/examples/">
+      All Examples <i class="fa fa-angle-right"></i>
     </a>
 
 </section>
 
+{% include examples.html container="section#examples" limit=9 %}
+
 <section class="half" id="posts">
 
-    <h2 class="bar">Blog Posts</h2>
+    <h1>Blog Posts</h1>
 
-    <a class="button right" href="/blog/" target="_blank">
+    <a class="moreButton" href="/blog/" target="_blank">
       All Posts <i class="fa fa-angle-right"></i>
     </a>
 
@@ -181,60 +178,3 @@ style: blog
     {% endfor %}
 
 </section>
-
-<section class="half" id="releases">
-
-    <h2 class="bar">Current Release</h2>
-
-    <a class="button right" href="https://github.com/alexandersimoes/d3plus/releases" target="_blank">
-      All Releases <i class="fa fa-angle-right"></i>
-    </a>
-
-</section>
-
-{% include examples.html container="examples" limit=10 %}
-
-<script src="/js/showdown.js"></script>
-<script>
-
-  // Get current release
-  d3.json("https://api.github.com/repos/alexandersimoes/d3plus/releases?client_id={{site.github_api.id}}&client_secret={{site.github_api.secret}}",function(d){
-
-    var div = d3.select("#releases").insert("div",".button")
-
-    if (d) {
-
-      var r = d.filter(function(r){
-        return !r.draft
-      })[0]
-
-      div.append("h3").html(r.name)
-      div.append("h5").html(new Date(r.published_at).toLocaleDateString())
-
-      var converter = new Showdown.converter();
-      var html = converter.makeHtml(r.body);
-
-      div.append("div").attr("class","body").html(html)
-
-    }
-    else {
-      div.html("Github not responding.")
-    }
-
-  });
-
-  // Get generic Github stats
-  d3.json("https://api.github.com/repos/alexandersimoes/d3plus?client_id={{site.github_api.id}}&client_secret={{site.github_api.secret}}",function(d){
-
-    if (d) {
-
-      d3.select("#issues").text(": "+d.open_issues_count);
-      d3.select("#watchers").text(": "+d.subscribers_count);
-      d3.select("#stars").text(": "+d.stargazers_count);
-      d3.select("#forks").text(": "+d.forks_count);
-
-    }
-
-  });
-
-</script>

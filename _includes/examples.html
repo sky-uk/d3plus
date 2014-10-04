@@ -1,50 +1,39 @@
-<script src="/js/d3.min.js"></script>
-<script src="/js/d3plus.min.js"></script>
 <script src="http://d3js.org/queue.v1.min.js"></script>
 
 <script>
 
-  var order = "{{ include.order }}".split(".")
-    , hidden = "{{ include.hidden }}".split(".")
-    , categories = {}
+  var categories = []
+    , limit = "{{ include.limit }}"
+    , hidden = "{{ include.hidden }}"
+    , gistCat = {}
     , gists = []
-    , users = []
-    , titles = {
-      "basic"     : "Basics",
-      "forms"     : "Forms",
-      "advanced"  : "Advanced",
-      "utilities" : "Utilities"
-    }
+    , users = ["davelandry"]
 
   if ("{{ include.container }}") {
-    var container = d3.select("#{{ include.container }}")
+    var container = d3.select("{{ include.container }}")
+  }
+  else {
+    var container = d3.select("#content")
   }
 
-  var section = container || d3.select("#content")
-    , loading = section.append("section").attr("id","loading")
+  var loading = container.append("section").attr("id","loading")
   loading.append("h2").text("Loading...")
 
   {% for p in site.pages %}
-    var url = "{{ p.url }}".split("/")
-      , user = "{{p.user}}"
-      , layout = "{{p.layout}}"
-    if (user != "" && users.indexOf(user) < 0) {
-      users.push(user)
-    }
 
-    if (layout && url.length == 5 && url[1] == "examples" && url[3] != "simple") {
-      var category = url[2]
-        , gist = url[3].split(".")[0]
+    var url = "{{ p.url }}".split("/"),
+        layout = "{{p.layout}}"
+
+    if (layout && url.length === 5 && url[1] === "examples" && url[3] !== "simple") {
+      var gist = url[3].split(".")[0]
       if (hidden.indexOf(gist) < 0) {
-        categories[gist] = category
+        var category = url[2]
+        gistCat[gist] = category
+        if (categories.indexOf(category) < 0) categories.push(category)
         gists.push(gist)
       }
     }
   {% endfor %}
-
-  if (users.indexOf("davelandry") < 0) {
-    users.push("davelandry")
-  }
 
   var q = queue()
   users.forEach(function(user){
@@ -57,173 +46,94 @@
   q.awaitAll(function(error,data){
 
     if (error || data.length == 0) {
-      loading.text("Error loading Examples")
+      loading.text("Error loading examples. Please try again later.")
     }
     else {
 
       var merged = []
       merged = merged.concat.apply(merged,data).filter(function(g){
-        // console.log(g.id,categories)
-        if ( g.public && gists.indexOf(g.id) >= 0 && g.id in categories ) {
-          g.category = categories[g.id]
+        if ( g.public && gists.indexOf(g.id) >= 0 ) {
+          g.category = gistCat[g.id]
           return true
         }
         return false
       })
 
+      merged.sort(function(a,b){ return new Date(b.created_at).getTime() - new Date(a.created_at).getTime() })
+
+      if (limit) merged = merged.slice(0,parseInt(limit))
+
       function enter(elem) {
 
-        elem.style("opacity",0)
+        elem
+          .style("opacity",0)
+          .style(d3plus.client.prefix()+"transform","scale(0)")
           .transition().duration(400).delay(delay)
-          .style("opacity",1)
+            .style("opacity",1)
+            .style(d3plus.client.prefix()+"transform","scale(1)")
 
-        delay += 30
+        delay += 50
 
       }
 
       loading.remove()
 
-      if ( order.length > 1 ) {
-
-        var toggles = [{"value": "all", "text": "All", "order": 1}]
-        order.forEach(function(type,i){
-
-          var title = titles[type]
-          || type.replace(/_/g," ").replace(/\w\S*/g, function(txt){
-            return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
-          })
-
-          toggles.push({"value": type, "text": title, "order": i+2})
-
-        })
-
-        var toggle = d3plus.form()
-          .container(d3.select("#content").append("section").attr("id","toggle"))
-          .data(toggles)
-          .focus("all",function(value){
-
-            value = value[0]
-
-            d3.selectAll("section").transition().duration(600)
-              .style("opacity",function(d){
-                return value === "all" || ["toggle",value].indexOf(this.id) >= 0 ? 1 : 0
-              })
-              .style("height",function(d){
-                return value === "all" || ["toggle",value].indexOf(this.id) >= 0 ? heights[this.id]+"px" : "0px"
-              })
-
-          })
-          .font({
-            "align": "center"
-          })
-          .order("order")
-          .type("toggle")
-          .width(350)
-          .ui({
-            "padding": 2
-          })
-          .draw()
-
-      }
-
       var delay = 0
-      order.forEach(function(type){
+      merged.forEach(function(gist){
 
-        var section = container || d3.select("#content").append("section").attr("id",type)
+        if (gist) {
 
-        if (type.length > 0) {
+          var dateCreated = new Date(gist.created_at).getTime()
+            , dateUpdated = new Date(gist.updated_at).getTime()
+            , daysCreated = (Date.now() - dateCreated)/(24*60*60*1000)
+            , daysUpdated = (Date.now() - dateUpdated)/(24*60*60*1000)
 
-          var title = titles[type]
-          || type.replace(/_/g," ").replace(/\w\S*/g, function(txt){
-            return txt.charAt(0).toUpperCase() + txt.substr(1).toLowerCase();
-          })
+          if (daysCreated <= 7) {
+            var banner = "New"
+          }
+          else if (daysUpdated <= 7) {
+            var banner = "Updated"
+          }
 
-          section.append("h2")
-            .text(title)
-            .call(enter)
+          var title = gist.description || gist.id,
+              image = gist.files["thumbnail.png"]
+                ? gist.files["thumbnail.png"].raw_url
+                : "/assets/img/thumbnail.png"
 
-          var section_gists = merged.filter(function(g){
-            return g.category == type
-          })
-
-        }
-        else {
-
-          var section_gists = merged.slice(0)
-
-        }
-
-        section_gists.sort(function(a,b){
-          return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
-        })
-
-        if ("{{ include.limit }}") {
-
-          section_gists = section_gists.slice(0,parseInt("{{ include.limit }}"))
-
-        }
-
-        section_gists.forEach(function(gist) {
-
-          if (gist) {
-
-            var dateCreated = new Date(gist.created_at).getTime()
-              , dateUpdated = new Date(gist.updated_at).getTime()
-              , daysCreated = (Date.now() - dateCreated)/(24*60*60*1000)
-              , daysUpdated = (Date.now() - dateUpdated)/(24*60*60*1000)
-
-            if (daysCreated <= 7) {
-              var banner = "New"
-            }
-            else if (daysUpdated <= 7) {
-              var banner = "Updated"
-            }
-
-            var title = gist.description || gist.id,
-                image = gist.files["thumbnail.png"]
-                  ? gist.files["thumbnail.png"].raw_url
-                  : "/assets/img/thumbnail.png"
-
-            var button = section.append("a")
-              .attr("class","example")
+          var button = container.append("div")
+            .attr("class","exampleWrapper cat_"+gist.category)
+            .append("a")
+              .attr("class","example cat_"+gist.category)
               .attr("href","/examples/"+gist.category+"/"+gist.id)
               .call(enter)
 
-            button.append("img")
-              .attr("src",image)
-              .attr("alt",title)
+          button.append("img")
+            .attr("src",image)
+            .attr("alt",title)
+
+          button.append("div")
+            .attr("class","title")
+            .text(title)
+
+          if (banner) {
+            var dateSlug = "<span class='banner "+banner+"'>"+banner+"</span> "
+            if (banner == "Updated") {
+              dateSlug += "on "
+            }
+            dateSlug += new Date(gist.updated_at).toLocaleDateString()
+          }
+
+          if (dateSlug) {
 
             button.append("div")
-              .attr("class","title")
-              .text(title)
-
-            if (banner) {
-              var dateSlug = "<span class='banner "+banner+"'>"+banner+"</span> "
-              if (banner == "Updated") {
-                dateSlug += "on "
-              }
-              dateSlug += new Date(gist.updated_at).toLocaleDateString()
-            }
-
-            if (dateSlug) {
-
-              button.append("div")
-                .attr("class","date")
-                .html(dateSlug)
-
-            }
+              .attr("class","date")
+              .html(dateSlug)
 
           }
 
-        })
+        }
 
       })
-
-      var heights = {}
-      d3.selectAll("section")
-        .each(function(d){
-          heights[this.id] = this.offsetHeight || Math.round(this.getBoundingClientRect().height)
-        })
 
     }
   })

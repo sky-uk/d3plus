@@ -40,7 +40,7 @@ a:hover {
   ------
 */
 header {
-  background-color: #f7f7f7;
+  background-color: rgba(250,250,250,0.95);
   box-shadow: 0px 0px 5px #eee;
   font-size: 14px;
   border-bottom: 1px solid #f0f0f0;
@@ -100,6 +100,10 @@ header a.active {
 
 p.example {
   padding: 0px 20px;
+}
+
+div.exampleWrapper {
+  display: inline-block;
 }
 
 a.example {
@@ -189,7 +193,14 @@ a.example span.banner.New {
 .button.right {
   position: absolute;
   right: 25px;
-  top: 10px;
+  top: -2px;
+}
+
+.moreButton {
+  display: block;
+  font-size: 13px;
+  margin-top: -15px;
+  margin-bottom: 20px;
 }
 
 footer {
