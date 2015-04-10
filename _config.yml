@@ -18,6 +18,8 @@ navigation:
   url: /blog/
 - text: Documentation
   url: https://github.com/alexandersimoes/d3plus/wiki
+# - text: Workshops
+#   url: /workshops/
 - text: Download
   url: /d3plus.zip
 - text: Source
@@ -77,7 +79,7 @@ workshops:
       url: future
 
   nav_03_19_2014:
-    title: "Workshop 3: March 19th, 2013 (Networks)"
+    title: "Workshop 3: March 19th, 2014 (Networks)"
     links:
     - text: Intro
       url: intro
@@ -97,3 +99,13 @@ workshops:
       url: customizing
     - text: Tree Map
       url: tree_map
+
+  nav_04_03_2015:
+    title: "Workshop 4: April 3rd, 2015 (Int'l Trade)"
+    links:
+    - text: Intro
+      url: intro
+    - text: Local Environment
+      url: env
+    - text: Downloading D3plus
+      url: download
