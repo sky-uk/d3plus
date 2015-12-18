@@ -88,10 +88,10 @@
             , daysCreated = (Date.now() - dateCreated)/(24*60*60*1000)
             , daysUpdated = (Date.now() - dateUpdated)/(24*60*60*1000)
 
-          if (daysCreated <= 7) {
+          if (daysCreated <= 14) {
             var banner = "New"
           }
-          else if (daysUpdated <= 7) {
+          else if (daysUpdated <= 14) {
             var banner = "Updated"
           }
 
