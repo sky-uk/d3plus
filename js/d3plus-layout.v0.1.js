@@ -6,7 +6,7 @@
 
 	d3 = 'default' in d3 ? d3['default'] : d3;
 
-	var version = "0.1.0";
+	var version = "0.1.1";
 
 	/**
 	    Wraps non-function variables in a simple return function.
@@ -109,8 +109,31 @@
 
 	/**
 	    @function treemap
+	    @desc Uses the [d3 treemap layout](https://github.com/mbostock/d3/wiki/Treemap-Layout) to creates SVG rectangles based on an array of data. If *data* is specified, immediately draws the tree map based on the specified array and returns this generator. If *data* is not specified on instantiation, it can be passed/updated after instantiation using the [data](#treemap.data) method.
+	    @param {Array} [data = []]
+	    @example <caption>using default key accessors</caption>
+	var data = [
+	  {"id": 0, "value": 100},
+	  {"id": 1, "value": 50}
+	];
+
+	treemap(data);
+	@example <caption>using non-default key accessors</caption>
+	var data = [
+	  {"name": 0, "value": 20},
+	  {"name": 1, "value": 10}
+	];
+
+	treemap()
+	  .id(function(d) {
+	    return d.name;
+	  })
+	  .value(function(d) {
+	    return d.value * 5;
+	  })();
 	*/
 	function treemap () {
+	  var data = arguments.length <= 0 || arguments[0] === undefined ? [] : arguments[0];
 
 	  /**
 	  The default value accessor function.
@@ -139,7 +162,6 @@
 	  });
 
 	  var changed = [],
-	      data = [],
 	      fill = treemapFill,
 	      group = undefined,
 	      id = treemapId,
@@ -279,7 +301,7 @@
 	    return arguments.length ? (value = typeof _ === "function" ? _ : constant(_), treemap) : value;
 	  };
 
-	  return treemap;
+	  return data.length ? treemap() : treemap;
 	}
 
 	exports.version = version;
