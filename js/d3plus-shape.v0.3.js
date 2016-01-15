@@ -6,7 +6,7 @@
 
 	d3 = 'default' in d3 ? d3['default'] : d3;
 
-	var version = "0.3.0";
+	var version = "0.3.1";
 
 	/**
 	    Wraps non-function variables in a simple return function.
@@ -105,54 +105,54 @@
 	    var groups = select.selectAll(".d3plus-shape-rect").data(data, id);
 
 	    /* Enter */
-	    var enter = groups.enter().append("g").attr("class", "d3plus-shape-rect").attr("id", function (d) {
-	      return "d3plus-shape-rect-" + id(d);
-	    }).attr("transform", function (d) {
-	      return "translate(" + x(d) + "," + y(d) + ")";
+	    var enter = groups.enter().append("g").attr("class", "d3plus-shape-rect").attr("id", function (d, i) {
+	      return "d3plus-shape-rect-" + id(d, i);
+	    }).attr("transform", function (d, i) {
+	      return "translate(" + x(d, i) + "," + y(d, i) + ")";
 	    });
 
-	    enter.append("rect").attr("width", 0).attr("height", 0).attr("x", 0).attr("y", 0).attr("fill", function (d) {
-	      return fill(d);
+	    enter.append("rect").attr("width", 0).attr("height", 0).attr("x", 0).attr("y", 0).attr("fill", function (d, i) {
+	      return fill(d, i);
 	    });
 
 	    /* Update */
-	    groups.transition().duration(timing).attr("transform", function (d) {
-	      return "translate(" + x(d) + "," + y(d) + ")";
+	    groups.transition().duration(timing).attr("transform", function (d, i) {
+	      return "translate(" + x(d, i) + "," + y(d, i) + ")";
 	    });
 
-	    groups.selectAll("rect").transition().duration(timing).attr("width", function (d) {
-	      return width(d);
-	    }).attr("height", function (d) {
-	      return height(d);
-	    }).attr("x", function (d) {
-	      return -width(d) / 2;
-	    }).attr("y", function (d) {
-	      return -height(d) / 2;
-	    }).attr("fill", function (d) {
-	      return fill(d);
+	    groups.selectAll("rect").transition().duration(timing).attr("width", function (d, i) {
+	      return width(d, i);
+	    }).attr("height", function (d, i) {
+	      return height(d, i);
+	    }).attr("x", function (d, i) {
+	      return -width(d, i) / 2;
+	    }).attr("y", function (d, i) {
+	      return -height(d, i) / 2;
+	    }).attr("fill", function (d, i) {
+	      return fill(d, i);
 	    });
 
 	    /* Exit */
 	    groups.exit().transition().delay(timing).remove();
 
-	    groups.exit().selectAll("rect").transition().duration(timing).attr("width", 0).attr("height", 0).attr("x", function (d) {
-	      return x(d);
-	    }).attr("y", function (d) {
-	      return y(d);
+	    groups.exit().selectAll("rect").transition().duration(timing).attr("width", 0).attr("height", 0).attr("x", function (d, i) {
+	      return x(d, i);
+	    }).attr("y", function (d, i) {
+	      return y(d, i);
 	    });
 
 	    /* Draw labels based on inner bounds */
-	    groups.each(function (d) {
+	    groups.each(function (d, i) {
 
 	      if (label !== void 0) {
-	        var b = innerBounds(width(d), height(d));
+	        var b = innerBounds(width(d, i), height(d, i));
 	        if (b) {
 
 	          var elem = d3.select(this).selectAll("text").data([0]);
-	          elem.enter().append("text").html(label(d));
+	          elem.enter().append("text").html(label(d, i));
 
 	          d3plusText.box().fontColor(function () {
-	            return d3plusColor.contrast(fill(d));
+	            return d3plusColor.contrast(fill(d, i));
 	          }).height(b.height).select(elem.node()).width(b.width).x(b.x).y(b.y)();
 	        } else d3.select(this).select("text").remove();
 	      } else d3.select(this).select("text").remove();
@@ -234,7 +234,7 @@
 
 	  /**
 	      @memberof rect
-	      @desc If *selector* is specified, sets the SVG container element to the specified d3 selector or DOM element and returns this rectangle generator. If *selector* is not specified, returns the current SVG container element, which is `undefined` by default.
+	      @desc If *selector* is specified, sets the SVG container element to the specified d3 selector or DOM element and returns this rectangle generator. If *selector* is not specified, returns the current SVG container element.
 	      @param {String|HTMLElement} [*selector* = d3.select("body").append("svg")]
 	  */
 	  rect.select = function (_) {
