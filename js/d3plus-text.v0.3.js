@@ -6,7 +6,7 @@
 
 	d3 = 'default' in d3 ? d3['default'] : d3;
 
-	var version = "0.3.0";
+	var version = "0.3.1";
 
 	/**
 	    Wraps non-function variables in a simple return function.
@@ -149,6 +149,7 @@
 	      height = boxHeight,
 	      id = boxId,
 	      lineHeight = undefined,
+	      overflow = constant(false),
 	      select = undefined,
 	      split = boxSplit,
 	      text = boxText,
@@ -193,6 +194,7 @@
 	      var fMax = fontMax(d, i),
 	          fMin = fontMin(d, i),
 	          h = height(d, i),
+	          oF = overflow(d, i),
 	          space = measure(" ", style),
 	          t = text(d, i),
 	          tA = textAnchor(d, i),
@@ -241,13 +243,12 @@
 	          for (var _iterator = words[Symbol.iterator](), _step; !(_iteratorNormalCompletion = (_step = _iterator.next()).done); _iteratorNormalCompletion = true) {
 	            var word = _step.value;
 
-	            var wordWidth = sizes[words.indexOf(word)];
-	            if (wordWidth > w) break;
-	            var nextChar = t.charAt(textProg.length + word.length);
+	            var nextChar = t.charAt(textProg.length + word.length),
+	                wordWidth = sizes[words.indexOf(word)];
 	            if (nextChar === " ") word += nextChar;
 	            if (widthProg + wordWidth > w - fS) {
 	              line++;
-	              if (lH * line > h) {
+	              if (lH * line > h || wordWidth > w && !oF) {
 	                if (resize) {
 	                  fS--;
 	                  if (fS < fMin) {
@@ -470,6 +471,15 @@
 	  */
 	  box.lineHeight = function (_) {
 	    return arguments.length ? (lineHeight = typeof _ === "function" ? _ : constant(_), box) : lineHeight;
+	  };
+
+	  /**
+	      @memberof box
+	      @desc If *value* is specified, sets the overflow accessor to the specified function or boolean and returns this box generator. If *value* is not specified, returns the current overflow accessor.
+	      @param {Function|Boolean} [*value* = false]
+	  */
+	  box.overflow = function (_) {
+	    return arguments.length ? (overflow = typeof _ === "function" ? _ : constant(_), box) : overflow;
 	  };
 
 	  /**
