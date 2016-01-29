@@ -21,7 +21,7 @@ layout: default
 
 <section>
   <p class="example"></p>
-  <iframe src="http://bl.ocks.org/{{user}}/raw/{{id}}/" width="990" height="{% if page.height == null %}640{% else %}{{ page.height }}{% endif %}"></iframe>
+  <iframe id="iframe-example" width="990" height="{% if page.height == null %}640{% else %}{{ page.height }}{% endif %}"></iframe>
   <script src="https://gist.github.com/{{user}}/{{id}}.js?file=index.html"></script>
 </section>
 
@@ -32,9 +32,14 @@ layout: default
 
   var id = "{{ id }}"
 
-  d3.json("https://api.github.com/gists/"+id+"?client_id={{site.github_api.id}}&client_secret={{site.github_api.secret}}",function(error,gist){
+  d3.json("https://api.github.com/gists/"+id+"?client_id={{site.github_api.id}}&client_secret={{site.github_api.secret}}",function(error, gist){
 
     if (!error || gist.length > 0) {
+
+      var doc = document.getElementById("iframe-example").contentWindow.document;
+      doc.open();
+      doc.write(gist.files["index.html"].content);
+      doc.close();
 
       var section = d3.select("section")
 
