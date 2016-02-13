@@ -4,57 +4,54 @@ title: Examples
 style: blog
 ---
 
-<div class="page-header">
-  <h1 class="post-title">Live Code Examples<h1>
+<div id="example-intro">
+  <div class="page-header">
+    <h1 class="post-title">Live Code Examples<h1>
+  </div>
+  <p class="post-snippit">One of the best ways to learn what D3plus can do is by viewing live code samples. If you there are any features you would like clarification on, or you're not sure how to do something, please either post your code in the <a href="https://groups.google.com/forum/#!forum/d3plus">Google Group</a> or contact us through our <a href="https://github.com/alexandersimoes/d3plus/issues">Github Issues Page</a>.</p>
+  <p>
+  <input id="example-search" type="text" placeholder="Search" />
+  </p>
 </div>
 
-
-<p class="post-snippit">One of the best ways to learn what D3plus can do is by viewing live code samples. If you there are any features you would like clarification on, or you're not sure how to do something, please either post your code in the <a href="https://groups.google.com/forum/#!forum/d3plus">Google Group</a> or contact us through our <a href="https://github.com/alexandersimoes/d3plus/issues">Github Issues Page</a>.</p>
-
-<div class="post-content">
-  <aside style="text-align: right"></aside>
-</div>
+<div id="examples"></div>
 
 <script>
 
-  var categories = ["basic", "advanced", "utilities", "forms"]
+  var width = 0, height = 0;
 
-  var toggles = [{"value": "all", "text": "All", "order": 1}]
-  categories.forEach(function(type,i){
-    toggles.push({"value": type, "order": i+2})
-  })
+  d3.select("input").on("keyup", function() {
 
-  var width = 0, height = 0
+    var q = this.value.toLowerCase();
 
-  var toggle = d3plus.form()
-    .container(d3.select("aside"))
-    .data(toggles)
-    .focus("all",function(value){
+    if (gistData) {
 
-      d3.selectAll("div.exampleWrapper").transition().duration(600)
+      var visible = gistData.filter(function(g){
+        return q === "" || g.description.toLowerCase().indexOf(q) >= 0;
+      }).map(function(g){ return g.id; });
+
+      d3.selectAll("div.exampleWrapper").transition().duration(200)
         .style("opacity",function(d){
           if (!height) height = this.offsetHeight || Math.round(this.getBoundingClientRect().height)
           if (!width) width = this.offsetWidth
-          return value === "all" || this.className.indexOf("cat_"+value) > 0 ? 1 : 0
+          return visible.indexOf(this.id.substring(4)) >= 0 ? 1 : 0
         })
         .style("width",function(d){
-          return value === "all" || this.className.indexOf("cat_"+value) > 0 ? width+"px" : "0px"
+          return visible.indexOf(this.id.substring(4)) >= 0 ? width+"px" : "0px"
         })
         .style("height",function(d){
-          return value === "all" || this.className.indexOf("cat_"+value) > 0 ? height+"px" : "0px"
+          return visible.indexOf(this.id.substring(4)) >= 0 ? height+"px" : "0px"
         })
 
-      d3.selectAll("a.example").transition().duration(600)
+      d3.selectAll("a.example").transition().duration(200)
         .style(d3plus.client.prefix()+"transform",function(d){
-          return value === "all" || this.className.indexOf("cat_"+value) > 0 ? "scale(1)" : "scale(0)"
+          return visible.indexOf(this.parentNode.id.substring(4)) >= 0 ? "scale(1)" : "scale(0)"
         })
 
-    })
-    .order("order")
-    .type("drop")
-    .title("Category")
-    .draw()
+    }
+
+  })
 
 </script>
 
-{% include examples.html hidden="10309148" container="div.post-content" %}
+{% include examples.html hidden="10309148" container="div#examples" %}

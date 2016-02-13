@@ -286,6 +286,28 @@ h2 + section.topic-2,
 h2 + section.topic-3 {
   border: none;
 }
+
+#example-intro {
+  display: block;
+  margin: 0 auto;
+  width: 50%;
+}
+
+#example-search {
+  display: block;
+  font-size: 24px;
+  font-weight: 200;
+  letter-spacing: 1px;
+  margin: 30px auto;
+  padding: 5px;
+  text-align: center;
+  width: 100%;
+}
+
+#examples {
+  text-align: center;
+}
+
 section.topic-2 .example,
 section.topic-3 .example {
   padding-top: 2%;
