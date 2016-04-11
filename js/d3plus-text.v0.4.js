@@ -4,7 +4,7 @@
 	(factory((global.d3plus_text = {}),global.d3_selection,global.d3_transition,global.d3_array));
 }(this, function (exports,d3Selection,d3Transition,d3Array) { 'use strict';
 
-	var version = "0.4.0";
+	var version = "0.4.1";
 
 	/**
 	    Wraps non-function variables in a simple return function.
@@ -26,8 +26,8 @@
 	  var style = arguments.length <= 1 || arguments[1] === undefined ? { "font-size": 10, "font-family": "sans-serif" } : arguments[1];
 
 	  var canvas = d3Selection.select("body").selectAll("canvas#d3plus-text-size").data([0]);
-	  canvas.enter().append("canvas").attr("id", "d3plus-text-size").style("position", "absolute").style("left", "-9999px").style("top", "-9999px").style("visibility", "hidden").style("display", "block");
-	  var context = canvas.node().getContext("2d");
+
+	  var context = canvas.enter().append("canvas").attr("id", "d3plus-text-size").style("position", "absolute").style("left", "-9999px").style("top", "-9999px").style("visibility", "hidden").style("display", "block").merge(canvas).node().getContext("2d");
 
 	  var font = [];
 	  if ("font-style" in style) font.push(style["font-style"]);
@@ -175,11 +175,11 @@
 
 	    var boxes = select.selectAll(".d3plus-text-box").data(data, id);
 
+	    boxes.exit().remove();
+
 	    boxes.enter().append("text").attr("class", "d3plus-text-box").attr("id", function (d, i) {
 	      return "d3plus-text-box-" + id(d, i);
-	    });
-
-	    boxes.attr("y", function (d, i) {
+	    }).merge(boxes).attr("y", function (d, i) {
 	      return y(d, i) + "px";
 	    }).attr("fill", function (d, i) {
 	      return fontColor(d, i);
@@ -197,6 +197,12 @@
 	          lineData = [""],
 	          sizes = undefined;
 
+	      var style = {
+	        "font-family": fontFamily(d, i),
+	        "font-size": fS,
+	        "line-height": lH
+	      };
+
 	      var fMax = fontMax(d, i),
 	          fMin = fontMin(d, i),
 	          h = height(d, i),
@@ -209,12 +215,6 @@
 	          words = split(t, i);
 
 	      var dx = tA === "start" ? 0 : tA === "end" ? w : w / 2;
-
-	      var style = {
-	        "font-family": fontFamily(d, i),
-	        "font-size": fS,
-	        "line-height": lH
-	      };
 
 	      /**
 	          Figures out the lineData to be used for wrapping.
@@ -335,9 +335,9 @@
 
 	      var tspans = d3.select(this).selectAll("tspan").data(lineData);
 
-	      tspans.exit().transition().duration(duration).attr("opacity", 0).remove();
-
 	      tspans.transition().duration(duration).call(tspanStyle);
+
+	      tspans.exit().transition().duration(duration).attr("opacity", 0).remove();
 
 	      tspans.enter().append("tspan").attr("dominant-baseline", "alphabetic").style("baseline-shift", "0%").attr("opacity", 0).call(tspanStyle).transition().duration(duration).delay(delay).attr("opacity", 1);
 	    });
