@@ -4,7 +4,7 @@
 	(factory((global.d3plus_text = global.d3plus_text || {})));
 }(this, function (exports) { 'use strict';
 
-	var version = "0.5.0";
+	var version = "0.5.1";
 
 	var xhtml = "http://www.w3.org/1999/xhtml";
 
@@ -2862,8 +2862,8 @@
 	var splitChars = ["-",  "/",  ";",  ":",  "&",
 	                    "u0E2F",  // thai character pairannoi
 	                    "u0EAF",  // lao ellipsis
-	                    "u0ECC",  // lao cancellation mark
 	                    "u0EC6",  // lao ko la (word repetition)
+	                    "u0ECC",  // lao cancellation mark
 	                    "u104A",  // myanmar sign little section
 	                    "u104B",  // myanmar sign section
 	                    "u104C",  // myanmar symbol locative
@@ -2894,14 +2894,14 @@
 	var burmeseRange = "\u1000-\u102A\u103F-\u1049\u1050-\u1055";
 	var japaneseRange = "\u3040-\u309f\u30a0-\u30ff\uff00-\uff9f\u3400-\u4dbf";
 	var chineseRange = "\u3400-\u9FBF";
-	var laoRange = "\u0E80-\u0EFF";
+	var laoRange = "\u0E81-\u0EAE\u0EB0-\u0EC4\u0EC8-\u0ECB\u0ECD-\u0EDD";
 
 	var noSpaceRange = burmeseRange + chineseRange + laoRange;
 
 	var splitWords = new RegExp(("[^\\s|\\" + (splitChars.join("|\\")) + "]+(\\" + (splitChars.join("|\\")) + ")*"), "g");
 	var japaneseChars = new RegExp(("[" + japaneseRange + "]"));
 	var noSpaceLanguage = new RegExp(("[" + noSpaceRange + "]"));
-	var splitAllChars = new RegExp(("(\\" + (prefixChars.join("|\\")) + ")*[" + noSpaceRange + "]|[a-z0-9]+(\\" + (suffixChars.join("|\\")) + "|\\" + (combiningMarks.join("|\\")) + ")*"), "gi");
+	var splitAllChars = new RegExp(("(\\" + (prefixChars.join("|\\")) + ")*[" + noSpaceRange + "](\\" + (suffixChars.join("|\\")) + "|\\" + (combiningMarks.join("|\\")) + ")*|[a-z0-9]+"), "gi");
 
 	/**
 	    @function width
