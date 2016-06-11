@@ -23,6 +23,9 @@ module.exports =
   labels:
     accepted: [Boolean]
     value:    true
+  maxListLength:
+    accepted: [Number]
+    value:    3
   order:
     accepted: ["color", "id", "size", "text"]
     sort:

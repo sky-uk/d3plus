@@ -393,6 +393,7 @@ module.exports = function(vars) {
                 "js": js,
                 "depth": colorDepth,
                 "footer": false,
+                "maxListLength": vars.legend.maxListLength.value,
                 "vars": vars,
                 "x": x,
                 "y": y,

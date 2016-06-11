@@ -159,7 +159,7 @@ module.exports = function(params) {
 
       }
 
-      var limit = length === "short" ? 3 : vars.data.large,
+      var limit = length === "short" ? params.maxListLength : vars.data.large,
           listLength = nameList.length,
           max   = d3.min([listLength , limit]),
           objs  = [];
