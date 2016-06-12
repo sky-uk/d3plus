@@ -33,6 +33,9 @@ module.exports =
       value:    "asc"
     value: "color"
   size:  [8, 30]
+  height:
+    accepted: [false, Number]
+    value: false
   tooltip:
     accepted: [Boolean]
     value:    true

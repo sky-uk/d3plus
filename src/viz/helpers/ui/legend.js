@@ -23,7 +23,8 @@ var arraySort = require("../../../array/sort.coffee"),
 module.exports = function(vars) {
 
   var key_display = true,
-      square_size = 0;
+      square_size = 0,
+      legend_height = vars.legend.height.value === false ? square_size : vars.legend.height.value;
 
   if (!vars.error.internal && vars.color.value && !vars.small && vars.legend.value) {
 
@@ -173,7 +174,7 @@ module.exports = function(vars) {
 
           rect
             .attr("width", square_size)
-            .attr("height", square_size)
+            .attr("height", legend_height)
             .attr("fill",function(g){
 
               d3.select(this.parentNode).select("text").remove();
@@ -205,27 +206,27 @@ module.exports = function(vars) {
                 pattern.select("rect").transition().duration(vars.draw.timing)
                   .attr("fill",color)
                   .attr("width",square_size)
-                  .attr("height",square_size);
+                  .attr("height",legend_height);
 
                 pattern.select("image").transition().duration(vars.draw.timing)
                   .attr("width",square_size)
-                  .attr("height",square_size);
+                  .attr("height",legend_height);
 
                 var pattern_enter = pattern.enter().append("pattern")
                   .attr("id",short_url)
                   .attr("width",square_size)
-                  .attr("height",square_size);
+                  .attr("height",legend_height);
 
                 pattern_enter.append("rect")
                   .attr("fill",color)
                   .attr("stroke", "none")
                   .attr("width",square_size)
-                  .attr("height",square_size);
+                  .attr("height",legend_height);
 
                 pattern_enter.append("image")
                   .attr("xlink:href",icon)
                   .attr("width",square_size)
-                  .attr("height",square_size)
+                  .attr("height",legend_height)
                   .each(function(d){
 
                     if (icon.indexOf("/") === 0 || icon.indexOf(window.location.hostname) >= 0) {
@@ -275,7 +276,7 @@ module.exports = function(vars) {
                         textWrap()
                           .align("middle")
                           .container( d3.select(this) )
-                          .height(square_size)
+                          .height(legend_height)
                           .padding(vars.ui.padding)
                           .resize(size.length > 1)
                           .size(size)
@@ -645,7 +646,7 @@ module.exports = function(vars) {
     if ( vars.dev.value ) print.time("positioning legend");
 
     if (square_size) {
-      var key_height = square_size+vars.ui.padding;
+      var key_height = legend_height+vars.ui.padding;
     }
     else {
       var key_box = vars.g.legend.node().getBBox(),
