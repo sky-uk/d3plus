@@ -27,7 +27,7 @@ module.exports =
     accepted: [Number]
     value:    3
   order:
-    accepted: ["color", "id", "size", "text"]
+    accepted: ["color", "id", "size", "text", Function]
     sort:
       accepted: ["asc", "desc"]
       value:    "asc"
