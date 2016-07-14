@@ -5,16 +5,19 @@ module.exports = (vars, axis, buffer) ->
 
   if vars[axis].scale.value isnt "share" and !vars[axis].range.value and vars[axis].reset
 
+    testScale = vars[axis].scale.viz.copy()
+    testScale.clamp(false) if "clamp" of testScale
+
     if axis is vars.axes.discrete
 
-      domain = vars[axis].scale.viz.domain()
+      domain = testScale.domain()
 
       if typeof domain[0] is "string"
         i = domain.length
         while i >= 0
           domain.splice(i, 0, "d3plus_buffer_"+i)
           i--
-        range = vars[axis].scale.viz.range()
+        range = testScale.range()
         range = buckets d3.extent(range), domain.length
         vars[axis].scale.viz.domain(domain).range(range)
 
@@ -23,6 +26,7 @@ module.exports = (vars, axis, buffer) ->
         domain = domain.slice().reverse() if axis.indexOf("y") is 0
 
         if vars[axis].ticks.values.length is 1
+          domain = [domain[0], domain[0]]
           if vars[axis].value is vars.time.value and
              vars.data.time.ticks.length isnt 1
             closestTime = closest(vars.data.time.ticks, domain[0])
@@ -47,10 +51,10 @@ module.exports = (vars, axis, buffer) ->
           additional = difference / (vars[axis].ticks.values.length - 1)
           additional = additional / 2
 
-          rangeMax = vars[axis].scale.viz.range()[1]
+          rangeMax = testScale.range()[1]
           maxSize  = vars.axes.scale.range()[1] * 1.5
-          domainLow = vars[axis].scale.viz.invert -maxSize
-          domainHigh  = vars[axis].scale.viz.invert rangeMax + maxSize
+          domainLow = testScale.invert -maxSize
+          domainHigh  = testScale.invert rangeMax + maxSize
 
           if domain[0] - additional < domainLow
 
@@ -62,7 +66,7 @@ module.exports = (vars, axis, buffer) ->
             domain = [domainLow, domainHigh]
             domain = domain.reverse() if axis.indexOf("y") is 0
 
-            domainCompare = vars[axis].scale.viz.domain()
+            domainCompare = testScale.domain()
             domainCompare = domainCompare[1] - domainCompare[0]
 
             unless domainCompare
@@ -87,7 +91,7 @@ module.exports = (vars, axis, buffer) ->
             d = if i then orig_domain[i - 1] + add else orig_domain[i] - add
             domain.splice(i, 0, d)
             i--
-          range = vars[axis].scale.viz.range()
+          range = testScale.range()
           range = buckets d3.extent(range), domain.length
           vars[axis].scale.viz.domain(domain).range(range)
 
@@ -99,7 +103,7 @@ module.exports = (vars, axis, buffer) ->
             (buffer is "y" and axis.indexOf("y") is 0) or
             (buffer is true)
 
-      domain = vars[axis].scale.viz.domain()
+      domain = testScale.domain()
 
       allPositive = domain[0] >= 0 and domain[1] >= 0
       allNegative = domain[0] <= 0 and domain[1] <= 0
@@ -165,16 +169,16 @@ module.exports = (vars, axis, buffer) ->
 
       else
 
-        rangeMax = vars[axis].scale.viz.range()[1]
+        rangeMax = testScale.range()[1]
         maxSize  = vars.axes.scale.range()[1]
 
-        domainLow = vars[axis].scale.viz.invert -maxSize*1.5
-        domainHigh  = vars[axis].scale.viz.invert rangeMax + maxSize*1.5
+        domainLow = testScale.invert -maxSize*1.5
+        domainHigh  = testScale.invert rangeMax + maxSize*1.5
 
         domain = [domainLow, domainHigh]
         domain = domain.reverse() if axis.indexOf("y") is 0
 
-        domainCompare = vars[axis].scale.viz.domain()
+        domainCompare = testScale.domain()
         domainCompare = domainCompare[1] - domainCompare[0]
 
         unless domainCompare

@@ -38,13 +38,15 @@ module.exports = (vars) ->
     color = if grid then vars[axis].grid.color else vars[axis].ticks.color
     log   = vars[axis].scale.value is "log"
 
+    visibles = vars[axis].ticks.visible or []
+
     tick
       .attr "stroke", (d) ->
 
         return vars[axis].axis.color if d is 0
 
         d = +d if d.constructor is Date
-        visible = vars[axis].ticks.visible.indexOf(d) >= 0
+        visible = visibles.indexOf(d) >= 0
 
         if visible and (!log or Math.abs(d).toString().charAt(0) is "1")
           color
@@ -110,7 +112,7 @@ module.exports = (vars) ->
       .attr "font-weight", vars[axis].lines.font.weight
 
   # Draw Plane Group
-  planeTrans = "translate(" + vars.axes.margin.left + "," + vars.axes.margin.top + ")"
+  planeTrans = "translate(" + vars.axes.margin.viz.left + "," + vars.axes.margin.viz.top + ")"
   plane = vars.group.selectAll("g#d3plus_graph_plane").data [0]
   plane.transition().duration vars.draw.timing
     .attr "transform", planeTrans
@@ -229,7 +231,7 @@ module.exports = (vars) ->
         if axis.indexOf("x") is 0
           vars.width.viz/2
         else
-          -(vars.axes.height/2+vars.axes.margin.top)
+          -(vars.axes.height/2+vars.axes.margin.viz.top)
       .attr "y",
         if axis is "x"
           vars.height.viz - vars[axis].label.height/2 - vars[axis].label.padding
@@ -260,6 +262,12 @@ module.exports = (vars) ->
       if vars[axis].ticks.values.indexOf(0) >= 0 and vars[opp].axis.value
         gridData = [0]
 
+    if vars[axis].value is vars.time.value
+      gridData = gridData.map (d) ->
+        d += ""
+        d += "/01/01" if d.length is 4 and parseInt(d)+"" is d
+        new Date(d).getTime()
+
     # Draw Axis Grid Lines
     grid = plane.selectAll("g#d3plus_graph_"+axis+"grid").data [0]
     grid.enter().append "g"
@@ -286,7 +294,7 @@ module.exports = (vars) ->
     if vars[axis].value
 
       axisLabel = vars[axis].label.fetch vars
-      labelData = if axisData and axisLabel then [0] else []
+      labelData = if axisData and axisLabel and !vars.small then [0] else []
       affixes   = vars.format.affixes.value[vars[axis].value]
       if axisLabel and !vars[axis].affixes.value and affixes
         sep = vars[axis].affixes.separator.value

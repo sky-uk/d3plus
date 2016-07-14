@@ -69,7 +69,7 @@ dataChange = (vars) ->
   changed = vars.id.solo.changed or vars.id.mute.changed unless changed
   return changed if changed
 
-  check = ["data", "time", "id", "depth", "type", "x", "y", "x2", "y2"]
+  check = ["data", "time", "id", "depth", "type", "width", "height", "x", "y", "x2", "y2"]
   for k in check
     if vars[k].changed
       changed = true
@@ -179,8 +179,10 @@ axisRange = (vars, axis, zero, buffer) ->
           arr
         , []
         counts
+      else if values[0].constructor is String
+        uniques(values).sort((a,b) -> "" + a.localeCompare("" + b))
       else
-        uniques(values).sort((a,b) -> a-b)
+        uniques(values).sort((a,b) -> a - b)
     else
       values.sort (a, b) -> a - b
       if vars[axis].scale.value is "log"
@@ -211,8 +213,10 @@ getScale = (vars, axis, range) ->
 
   vars[axis].scale.ticks = t
 
-  d3.scale[scaleType]()
-    .domain(range).range(rangeArray).clamp(true)
+  retScale = d3.scale[scaleType]()
+    .domain(range).range(rangeArray)
+  retScale.clamp(true) if "clamp" of retScale
+  retScale
 
 sizeScale = (vars, value) ->
 
